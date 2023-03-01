@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<server description="new server">
+
+    <!-- Enable features -->
+    <featureManager>
+      <feature>javaMail-1.6</feature>
+			<feature>jdbc-4.2</feature>
+			<feature>jaxws-2.2</feature>
+			<feature>jndi-1.0</feature>
+			<feature>wasJmsClient-2.0</feature>
+			<feature>ssl-1.0</feature>
+			<feature>monitor-1.0</feature>
+			<feature>webProfile-8.0</feature>
+			<feature>openidConnectClient-1.0</feature>
+			<feature>transportSecurity-1.0</feature>
+			<!--feature>wmqJmsClient-2.0</feature>
+			<feature>jmsMdb-3.2</feature-->
+			<feature>ejbRemote-3.2</feature>
+			<feature>ejbHome-3.2</feature>
+			<feature>jsonp-1.1</feature>
+			<feature>appSecurity</feature>
+    </featureManager>
+
+	<httpDispatcher enableWelcomePage="false" trustedHeaderOrigin="*" trustedSensitiveHeaderOrigin="*"/>
+                  
+	<webContainer  extractHostHeaderPort="true" trustHostHeaderPort="true" disableXPoweredBy="true" />
+
+	<cdi12 enableImplicitBeanArchives="false"/>
+
+	<httpSession cookieName="JSESSIONIDUI" invalidateOnUnauthorizedSessionRequestException ="true" cookieSecure="true" invalidationTimeout="12h"/>
+
+	<authCache timeout="12h" />
+
+	<webAppSecurity  httpOnlyCookies="true" ssoDomainNames="${env.DOMAIN_NAME}" ssoRequiresSSL="true" />
+
+	<openidConnectClient 
+		authorizationEndpointUrl="${env.AUTH_AUTHORIZATION_URL}" 
+		clientId="${env.CLIENT_ID}" 
+		clientSecret="${env.CLIENT_SECRET}"
+		httpsRequired="true" 
+		id="oidc" 
+		inboundPropagation="supported"
+		includeIdTokenInSubject="true" 
+		isClientSideRedirectSupported="false"
+		accessTokenInLtpaCookie="true"
+		issuerIdentifier="${env.AUTH_ISSUER_URL}"
+		mapIdentityToRegistryUser="false" 
+		scope="openid" signatureAlgorithm="RS256" 
+		tokenEndpointUrl="${env.AUTH_TOKEN_URL}"
+		jwkEndpointUrl="${env.JWK_ENDPOINT_URL}"
+		validationEndpointUrl="${env.VALIDATION_ENDPOINT_URL}"
+		disableIssChecking="false"
+		headerName="x-access-token"> 
+	</openidConnectClient>
+
+	
+	<jndiEntry jndiName="maxappname" value="ezmaxmobile"/>
+
+	<applicationManager autoExpand="true"/>
+
+	<application context-root="ezmaxmobile" type="ear" id="ezmaxmobile" location="emm.ear" name="ezmaxmobile">
+		<application-bnd>
+			<security-role name="any-authenticated">
+				<special-subject type="ALL_AUTHENTICATED_USERS" />
+			</security-role>
+
+			<security-role name="everyone">
+				<special-subject type="EVERYONE" />
+			</security-role>
+		</application-bnd>
+	</application>
+
+	<include optional="true" location="/config/manage/serverxml/server-custom.xml" /> 
+	
+    <httpAccessLogging id="httpaccesslog"
+        filePath="${server.output.dir}/logs/http_access.log"></httpAccessLogging>
+
+	<!-- To access this server from a remote client add a host attribute to the following element, e.g. host="*" -->
+    <httpEndpoint id="defaultHttpEndpoint"
+				  sslOptionsRef="sslopt"
+	              host="*"
+                  httpPort="9080"
+                  httpsPort="9443" 
+				  protocolVersion="http/1.1" >
+	    <compression serverPreferredAlgorithm="deflate|gzip|x-gzip|zlib|identity|none">
+	        <types>+application/*</types>
+	        <types>-text/plain</types>
+	    </compression>
+	</httpEndpoint>
+
+	<sslDefault sslRef="ssl" />
+	<sslOptions id="sslopt" sslRef="ssl" />
+
+	<ssl id="ssl" sslProtocol="TLSv1.2" keyStoreRef="keyStore" 
+	       trustStoreRef="trustStore" trustDefaultCerts="true" clientAuthenticationSupported="true" />
+	
+	<!-- inbound (HTTPS) keystore -->
+    <keyStore id="keyStore" location="${env.java_keystore}" password="${env.java_keystore_password}" />
+	<!-- inbound (HTTPS) truststore -->
+    <keyStore id="trustStore" location="${env.java_truststore}" password="${env.java_truststore_password}" pollingRate="5s" updateTrigger="polled"/>
+
+    <basicRegistry id="basic" realm="customRealm"/>    
+</server>
