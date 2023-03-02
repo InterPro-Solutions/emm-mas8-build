@@ -34,21 +34,17 @@
 	<webAppSecurity  httpOnlyCookies="true" ssoDomainNames="${env.DOMAIN_NAME}" ssoRequiresSSL="true" />
 
 	<openidConnectClient 
-		authorizationEndpointUrl="${env.AUTH_AUTHORIZATION_URL}" 
-		clientId="${env.CLIENT_ID}" 
+		clientId="${env.CLIENT_ID}"
 		clientSecret="${env.CLIENT_SECRET}"
+		discoveryEndpointUrl="${env.OIDC_DISCOVERY_URL}"
 		httpsRequired="true" 
 		id="oidc" 
 		inboundPropagation="supported"
 		includeIdTokenInSubject="true" 
 		isClientSideRedirectSupported="false"
 		accessTokenInLtpaCookie="true"
-		issuerIdentifier="${env.AUTH_ISSUER_URL}"
-		mapIdentityToRegistryUser="false" 
+		mapIdentityToRegistryUser="false"
 		scope="openid" signatureAlgorithm="RS256" 
-		tokenEndpointUrl="${env.AUTH_TOKEN_URL}"
-		jwkEndpointUrl="${env.JWK_ENDPOINT_URL}"
-		validationEndpointUrl="${env.VALIDATION_ENDPOINT_URL}"
 		disableIssChecking="false"
 		headerName="x-access-token"> 
 	</openidConnectClient>
