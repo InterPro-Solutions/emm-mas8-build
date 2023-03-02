@@ -1,0 +1,137 @@
+kind: BuildConfig
+apiVersion: build.openshift.io/v1
+metadata:
+  # your name here
+  name: myemm-ear-build-config
+  namespace: mas-inst8809-manage
+spec:
+  nodeSelector: null
+  output:
+    to:
+      # Same name as ImageStream
+      kind: ImageStreamTag
+      name: 'myemm-ear:v1'
+  resources:
+    limits:
+      ephemeral-storage: 100Gi
+    requests:
+      ephemeral-storage: 30Gi
+  successfulBuildsHistoryLimit: 5
+  failedBuildsHistoryLimit: 5
+  strategy:
+    type: Docker
+    dockerStrategy:
+      pullSecret:
+        name: ibm-entitlement
+      forcePull: true
+  postCommit: {}
+  source:
+    type: Dockerfile
+    dockerfile: >
+      FROM cp.icr.io/cp/manage/manageadmin:8.4.5 AS ADMIN
+
+
+      WORKDIR /opt/IBM/SMP/maximo
+
+
+      RUN mkdir -p /opt/IBM/SMP/maximo/additional-server-files
+
+
+
+
+      COPY --chown=maximoinstall:0 tmp_build_files .
+
+
+
+      RUN rm -rf customizationCredentials && rm trust.p12 && rm
+      truststorePassword
+
+
+      # Remove translation files that will not be used.
+
+      WORKDIR /opt/IBM/SMP/maximo
+
+      RUN rm -f translation_files.zip lang/MaximoLangPkgXliff_Ar.zip
+      lang/MaximoLangPkgXliff_Cs.zip lang/MaximoLangPkgXliff_Da.zip
+      lang/MaximoLangPkgXliff_De.zip lang/MaximoLangPkgXliff_Es.zip
+      lang/MaximoLangPkgXliff_Fi.zip lang/MaximoLangPkgXliff_Fr.zip
+      lang/MaximoLangPkgXliff_He.zip lang/MaximoLangPkgXliff_Hr.zip
+      lang/MaximoLangPkgXliff_Hu.zip lang/MaximoLangPkgXliff_It.zip
+      lang/MaximoLangPkgXliff_Ja.zip lang/MaximoLangPkgXliff_Ko.zip
+      lang/MaximoLangPkgXliff_Nl.zip lang/MaximoLangPkgXliff_No.zip
+      lang/MaximoLangPkgXliff_Pl.zip lang/MaximoLangPkgXliff_Pt_BR.zip
+      lang/MaximoLangPkgXliff_Ru.zip lang/MaximoLangPkgXliff_Sk.zip
+      lang/MaximoLangPkgXliff_Sl.zip lang/MaximoLangPkgXliff_Sv.zip
+      lang/MaximoLangPkgXliff_Tr.zip lang/MaximoLangPkgXliff_Zh_CN.zip
+      lang/MaximoLangPkgXliff_Zh_TW.zip
+
+      RUN rm -rf tools/maximo/ar tools/maximo/cs tools/maximo/da tools/maximo/de
+      tools/maximo/es tools/maximo/fi tools/maximo/fr tools/maximo/he
+      tools/maximo/hr tools/maximo/hu tools/maximo/it tools/maximo/ja
+      tools/maximo/ko tools/maximo/nl tools/maximo/no tools/maximo/pl
+      tools/maximo/pt tools/maximo/ru tools/maximo/sk tools/maximo/sl
+      tools/maximo/sv tools/maximo/tr tools/maximo/zh tools/maximo/zht
+
+
+      WORKDIR /opt/IBM/SMP/maximo/tools/maximo
+
+
+      RUN \
+        mkdir -p /opt/IBM/SMP/maximo/applications/maximo/businessobjects/classes/psdi/app/signature/apps &&\
+        mkdir -p /opt/IBM/SMP/maximo/tools/maximo/log &&\
+        ./pkginstall.sh && ./updatedblitepreprocessor.sh -disconnected &&\
+        find /opt/IBM/SMP/maximo/applications -type d -exec chmod 777 {} + &&\
+        chmod ugo+rw -R /opt/IBM/SMP/maximo/applications &&\
+        find /opt/IBM/SMP/maximo/tools/maximo -type d -exec chmod 777 {} + &&\
+        chmod ugo+rw -R /opt/IBM/SMP/maximo/tools/maximo &&\
+        chmod 777 /opt/IBM/SMP/maximo/tools/maximo/log &&\
+        find /opt/IBM/SMP/maximo/tools/maximo/en -type f -name postupdatedb.sh -exec chmod -v 777 {} +
+
+      WORKDIR /opt/IBM/SMP/maximo/deployment/was-liberty-default
+
+      # TODO: Use Maximo ear from existing pod/image
+      RUN ./maximo-all.sh && ./buildmaximoui-war.sh && ./buildmaximo-xwar.sh &&
+      ./maximo-cron.sh
+
+
+      ENV MXE_MASDEPLOYED=1
+
+      ENV MXE_USESQLSERVERSEQUENCE=1
+
+      ENV LC_ALL=en_US.UTF-8
+
+      ENV LANGUAGE_BASE=en
+
+      ENV LANGUAGE_ADD=
+
+      WORKDIR /opt/IBM/SMP/maximo/tools/maximo
+
+      WORKDIR /opt/IBM/SMP
+
+      # TODO: Pull EMM files from GitHub with authentication
+
+      RUN \
+        wget -c http://124.222.21.115:3000/ezmaxmobile.zip &&\
+        unzip ezmaxmobile.zip &&\
+        cd ezmaxmobile &&\
+        chmod u+x ./buildemmear.sh &&\
+        ./buildemmear.sh &&\
+        ls -al default &&\
+        ls -al was-liberty-default &&\
+        ls -al was-liberty-default/emm-server/apps &&\
+        ls -al /opt/IBM/SMP/maximo/deployment/was-liberty-default/deployment/maximo-all/maximo-all-server &&\
+        ls -al /opt/IBM/SMP/maximo/additional-server-files
+
+      WORKDIR /opt/IBM/SMP/maximo/tools/maximo
+
+      #CMD sleep 123456789
+
+    secrets:
+      - secret:
+          name: inst8809-masdev-manage-truststorepasswd
+        destinationDir: tmp_build_files
+    configMaps:
+      - configMap:
+          name: inst8809-masdev-truststore-cfg
+        destinationDir: tmp_build_files
+  runPolicy: Serial
