@@ -26,10 +26,11 @@ export MXE_USESQLSERVERSEQUENCE=1
 #export CLIENT_SECRET=rYNS1gPCvKPzjiETVFSkfQQ3ZbTaji1F
 export CLIENT_ID=myemm2
 export CLIENT_SECRET=8zO0gOSGkmoRZDMR0QmrNSVodAkbWIE6m7MkK3kEIHGFVEAwgG7t8OrhYXWq
-export java_truststore=/opt/ibm/wlp/usr/servers/defaultServer/truststore/trust.p12
-export java_keystore=/opt/ibm/wlp/usr/servers/defaultServer/managefiles/key.p12
-export java_truststore_password=9AUZyNWe4jrUN0Xd
-export java_keystore_password=9AUZyNWe4jrUN0Xd
+# These four must be set in deployment config
+#export java_truststore=/opt/ibm/wlp/usr/servers/defaultServer/truststore/trust.p12
+#export java_keystore=/opt/ibm/wlp/usr/servers/defaultServer/managefiles/key.p12
+#export java_truststore_password=9AUZyNWe4jrUN0Xd
+#export java_keystore_password=9AUZyNWe4jrUN0Xd
 export ENCRYPT_PROPERTY_HASH=5556b78805e7223631c659ee0836fa0663b176cb6bafb9fc5ea99f5ea565d84f
 export MXE_SECURITY_CRYPTO_KEY=XVhIsqOvAOjmMiHCnuvHZmUN
 export MXE_SECURITY_OLD_CRYPTOX_KEY=swBfNAMPoIWJsZqlhEJtYhDh

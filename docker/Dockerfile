@@ -6,6 +6,7 @@ FROM cp.icr.io/cp/manage/ubi-wlp-manage:2.2.13 AS LIBERTY
 COPY --chown=1001:0 emm-server/apps/  /config/dropins
 COPY --chmod=775 --chown=1001:0 test.sh /config/
 COPY --chmod=775 --chown=1001:0 setenv.sh /config/
+COPY --chmod=775 --chown=1001:0 getkey.sh /config/
 COPY --chown=1001:0 server.xml /config/
 COPY --chown=1001:0 jvm.options /config/
 
