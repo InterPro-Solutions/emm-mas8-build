@@ -14,6 +14,10 @@ APP_ID=$(echo ${METADATA_NAME:?} | sed -e 's/-build-config.*//;t;q1')
 DOMAIN_NAME=$(echo ${OAUTH_URL:?} | sed -e 's/^https:\/\/auth\.\([^\/]*\).*/\1/;t;q1')
 APPS_DOMAIN_NAME=$(echo $DOMAIN_NAME | sed -e 's/.*\(apps.*\)/\1/;t;q1') || echo "Error: Could not find 'apps' base"
 
+# Try and get core namespace for later
+# -n suppress printing mattern space; p prints only if a match occurred
+CORE_NAMESPACE=$(echo ${METADATA_NAMESPACE:?} | sed -ne 's/-manage$/-core/p')
+
 # OIDC Client Registration
 # Build app url from namespace, app_id, and apps domain name
 APP_URL="https://$APP_ID-$METADATA_NAMESPACE.$APPS_DOMAIN_NAME"
@@ -65,13 +69,16 @@ CLIENT_SECRET=$CLIENT_SECRET
 APP_ID=$APP_ID
 APP_URL=$APP_URL
 DOMAIN_NAME=$DOMAIN_NAME
+CORE_NAMESPACE=$CORE_NAMESPACE
 EOF
-cat << EOF >> setenv.sh
+cat << EOF > setenv2.sh
 #!/bin/bash
 set -a
 $(cat server.env)
 set +a
+$(cat setenv.sh)
 EOF
+mv setenv2.sh setenv.sh
 chmod 775 server.env
 chmod 775 setenv.sh
 set +x
