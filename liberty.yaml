@@ -1,6 +1,7 @@
 apiVersion: build.openshift.io/v1
 kind: BuildConfig
 metadata:
+  # Same as image stream + -build-config
   name: myemm-liberty-build-config
   namespace: mas-inst8809-manage
 spec:
@@ -8,68 +9,70 @@ spec:
   output:
     to:
       kind: ImageStreamTag
+      # Name of ImageStream
       name: 'myemm-liberty:v1'
   resources:
     limits:
       ephemeral-storage: 50Gi
     requests:
       ephemeral-storage: 10Gi
-  successfulBuildsHistoryLimit: 5
-  failedBuildsHistoryLimit: 5
   strategy:
     type: Docker
     dockerStrategy:
       pullSecret:
         name: ibm-entitlement
+      env:
+        - name: METADATA_NAMESPACE
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+        - name: METADATA_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
+        # These 3 are just the instance name + -coreidp-system-binding for the secret name
+        - name: OAUTH_URL
+          valueFrom:
+            secretKeyRef:
+              name: inst8809-coreidp-system-binding
+              key: url
+        - name: OAUTH_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: inst8809-coreidp-system-binding
+              key: oauth-admin-username
+        - name: OAUTH_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: inst8809-coreidp-system-binding
+              key: oauth-admin-password
       forcePull: true
   postCommit: {}
   source:
-    type: Dockerfile
-    dockerfile: >
-      FROM cp.icr.io/cp/manage/ubi-wlp-manage:2.2.13 AS LIBERTY
-
-
-      #ARG VERBOSE=true
-
-
-      COPY --chown=1001:0 emm-server/apps/  /config/dropins
-
-      RUN rm /opt/ibm/wlp/usr/servers/defaultServer/server.env && mkdir
-      /managefiles/additional-server-files
-
-
-      COPY --chown=1001:0 additional-server-files/
-      /managefiles/additional-server-files/
-
-
-      ENV MXE_MASDEPLOYED=1
-
-      ENV MXE_USESQLSERVERSEQUENCE=1
-
-      ENV LC_ALL=en_US.UTF-8
-
-      USER 1001
-
-
-      # This is overridden by container cmd when deployed in OpenShift
-
-      # CMD /opt/ibm/wlp/bin/server run defaultServer
-
-      CMD sleep 123456789
+    type: Git
+    git:
+      uri: 'git@github.com:aantonitis/emm-mas8-build.git'
+    # source secret created earlier
+    sourceSecret:
+      name: emm-mas8-build-ssh-key
     images:
       - from:
           kind: ImageStreamTag
+          # Name of EAR ImageStream from earlier
           name: 'myemm-ear:v1'
         paths:
-          - sourcePath: >-
-              /opt/IBM/SMP/ezmaxmobile/was-liberty-default/emm-server
-            destinationDir: .
+          - sourcePath: /opt/IBM/SMP/ezmaxmobile/was-liberty-default/emm-server
+            destinationDir: ./docker
           - sourcePath: /opt/IBM/SMP/maximo/additional-server-files
-            destinationDir: .
+            destinationDir: ./docker
+    contextDir: docker
   triggers:
     - type: ImageChange
       imageChange:
         from:
           kind: ImageStreamTag
+          # Name of EAR ImageStream from earlier
           name: 'myemm-ear:v1'
   runPolicy: Serial

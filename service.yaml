@@ -1,0 +1,24 @@
+kind: Service
+apiVersion: v1
+metadata:
+  # App name
+  name: myemm-liberty
+  namespace: mas-inst8809-manage
+  labels:
+    # App name
+    app: myemm-liberty
+    mas.ibm.com/appType: serverBundle
+    # Instance name
+    mas.ibm.com/instanceId: inst8809
+spec:
+  ports:
+    - name: 9080-tcp
+      protocol: TCP
+      port: 9080
+    - name: 9443-tcp
+      protocol: TCP
+      port: 9443
+  selector:
+    # App name
+    app: myemm-liberty
+    deploymentconfig: myemm-liberty

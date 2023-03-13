@@ -1,0 +1,22 @@
+kind: Route
+apiVersion: route.openshift.io/v1
+metadata:
+  # App name
+  name: myemm2-liberty
+  namespace: mas-inst8809-manage
+  labels:
+    # App name
+    app: myemm2-liberty
+    mas.ibm.com/appType: serverBundle
+    # Instance name
+    mas.ibm.com/instanceId: inst8809
+spec:
+  to:
+    kind: Service
+    name: myemm2-liberty
+  port:
+    targetPort: 9443-tcp
+  tls:
+    termination: reencrypt
+  # TODO: certificate, key, destinationCACertificate
+  wildcardPolicy: None

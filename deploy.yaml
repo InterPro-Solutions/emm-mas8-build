@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # Must match Liberty build config name!
+  name: myemm-liberty
+  namespace: mas-inst8809-manage
+spec:
+  selector:
+    matchLabels:
+      # App name
+      app: myemm-liberty
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        # App name
+        app: myemm-liberty
+        deploymentconfig: myemm-liberty
+        mas.ibm.com/appType: serverBundle
+        # Instance name
+        mas.ibm.com/instanceId: inst8809
+    spec:
+      containers:
+        - name: myemm-liberty
+          command:
+            - /bin/bash
+            - '-c'
+            - '--'
+          args:
+            - >-
+              ./config/getkey.sh && source ./config/setenv.sh &&
+              /opt/ibm/wlp/bin/server run defaultServer
+          # Registry/<manage namespace>/<app name>:latest
+          image: >-
+            image-registry.openshift-image-registry.svc:5000/mas-inst8809-manage/myemm-liberty:latest
+          ports:
+            - containerPort: 9080
+              protocol: TCP
+            - containerPort: 9443
+              protocol: TCP
+          env:
+            - name: java_truststore
+              value: /config/truststore/trust.p12
+            - name: java_truststore_password
+              valueFrom:
+                secretKeyRef:
+                  # Instance name + -masdev-manage-truststorepasswd
+                  name: inst8809-masdev-manage-truststorepasswd
+                  key: truststorePassword
+            - name: java_keystore
+              value: /config/managefiles/key.p12
+            - name: java_keystore_password
+              valueFrom:
+                secretKeyRef:
+                  # Instance name + -masdev-manage-truststorepasswd
+                  name: inst8809-masdev-manage-truststorepasswd
+                  key: truststorePassword
+            - name: MAS_LOGOUT_URL
+              # http://masdev.home.<instance name>.apps.sno8809.<domain>/logout
+              value: 'https://masdev.home.inst8809.apps.sno8809.ezmaxcloud.com/logout'
+            - name: MXE_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  # Look in 'secrets' for workspace application binding
+                  name: inst8809-masdev-jdbccfg-workspace-application-binding
+                  key: url
+            - name: MXE_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: inst8809-masdev-jdbccfg-workspace-application-binding
+                  key: username
+            - name: MXE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: inst8809-masdev-jdbccfg-workspace-application-binding
+                  key: password
+            - name: MXE_DB_SCHEMAOWNER
+              value: dbo
+            - name: MXE_DB_DRIVER
+              value: com.microsoft.sqlserver.jdbc.SQLServerDriver
+            - name: MXE_MAS_WORKSPACEID
+              value: masdev
+            - name: DB_SSL_ENABLED
+              value: nossl
+            - name: additional_serverconfig_hash
+              value: nohash
+            - name: TZ
+              value: GMT
+            - name: MXE_SECURITY_CRYPTOX_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: masdev-manage-encryptionsecret
+                  key: MXE_SECURITY_CRYPTOX_KEY
+            - name: MXE_SECURITY_CRYPTO_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: masdev-manage-encryptionsecret
+                  key: MXE_SECURITY_CRYPTO_KEY
+          volumeMounts:
+            - name: manage-truststore
+              readOnly: true
+              mountPath: /config/truststore
+            - name: manage-public-certs
+              readOnly: true
+              mountPath: /etc/ssl/certs/public-manage-tls
+            - name: internal-manage-tls
+              readOnly: true
+              mountPath: /etc/ssl/certs/internal-manage-tls
+      volumes:
+        - name: manage-truststore
+          # Each volume seems to just be <instance name> + the rest of the name
+          configMap:
+            name: inst8809-masdev-truststore-cfg
+            defaultMode: 420
+        - name: manage-public-certs
+          secret:
+            secretName: inst8809-masdev-cert-public-81
+            defaultMode: 420
+        - name: internal-manage-tls
+          secret:
+            secretName: inst8809-internal-manage-tls
+            defaultMode: 420

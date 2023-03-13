@@ -4,7 +4,7 @@ FROM cp.icr.io/cp/manage/ubi-wlp-manage:2.2.13 AS LIBERTY
 #ARG VERBOSE=true
 
 COPY --chown=1001:0 emm-server/apps/  /config/dropins
-COPY --chmod=775 --chown=1001:0 test.sh /config/
+COPY --chmod=775 --chown=1001:0 buildenv.sh /config/
 COPY --chmod=775 --chown=1001:0 setenv.sh /config/
 COPY --chmod=775 --chown=1001:0 getkey.sh /config/
 COPY --chown=1001:0 server.xml /config/
@@ -14,7 +14,7 @@ RUN rm /opt/ibm/wlp/usr/servers/defaultServer/server.env && mkdir /managefiles/a
 
 WORKDIR /config/
 
-RUN pwd && ls -la && id && ./test.sh
+RUN pwd && ls -la && id && ./buildenv.sh
 
 # Move EAR file
 RUN mv /config/dropins/ezmaxmobile.ear /config/apps/emm.ear

@@ -1,5 +1,7 @@
 #!/bin/sh
 
+# Runtime environment variables for deploying EMM
+
 #export ENVIRONMENT_APPID=manage
 #export ENVIRONMENT_APPID=ezmaxmobile
 # These variables are set during the build process and appended to this file
@@ -46,12 +48,11 @@ fi
 #export java_keystore=/opt/ibm/wlp/usr/servers/defaultServer/managefiles/key.p12
 #export java_truststore_password=9AUZyNWe4jrUN0Xd
 #export java_keystore_password=9AUZyNWe4jrUN0Xd
-# TODO: Where is this hash from
+# TODO: Where is this hash from and is it needed?
 #export ENCRYPT_PROPERTY_HASH=5556b78805e7223631c659ee0836fa0663b176cb6bafb9fc5ea99f5ea565d84f
 #export MXE_SECURITY_CRYPTO_KEY=XVhIsqOvAOjmMiHCnuvHZmUN
 #export MXE_SECURITY_OLD_CRYPTOX_KEY=swBfNAMPoIWJsZqlhEJtYhDh
 #export MXE_SECURITY_CRYPTOX_KEY=swBfNAMPoIWJsZqlhEJtYhDh
 #export MXE_SECURITY_OLD_CRYPTO_KEY=XVhIsqOvAOjmMiHCnuvHZmUN
 export SETENV_RUN=1
-touch /config/setenv.log
 set +a

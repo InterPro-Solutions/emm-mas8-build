@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Get keystore from manage TLS
+# Get keystore from manage TLS and export
 
 mkdir -p /config/managefiles
 openssl pkcs12 -export \

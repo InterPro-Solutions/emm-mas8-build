@@ -1,7 +1,15 @@
 # EMM on OpenShift Liberty Installation Guide
-Originally by Fan Kong
+This is loosely based off of Fan's original installation guide, but in Markdown, with inline YAML files.
+
+For the most part, the entire process is done in `Administrator` mode.
+
+For each step, you will have to scroll down, reading the entire YAML
+and replacing commented fields to match your environment.
 ## Build ear image
-1. Create EMM ear image
+1. Create an ImageStream for the EMM ear file. (Builds -> ImageStreams)
+
+The EAR file has to be built separately, as the image used for actual deployment doesn't
+have the tools necessary to build it.
 ```yaml
 apiVersion: image.openshift.io/v1
 kind: ImageStream
@@ -10,12 +18,16 @@ metadata:
   name: myemm-ear
   namespace: mas-inst8809-manage
 ```
-2. Create EMM ear buildconfig
+2. Create EMM ear buildconfig (Builds -> BuildConfigs)
+
+Note the references to the ImageStream just created, as well as the DEPLOY_TOKEN.
+
+This token and DEPLOY_GATEWAY_URL grant access to the actual EMM build files for a client.
 ```yaml
 kind: BuildConfig
 apiVersion: build.openshift.io/v1
 metadata:
-  # your name here
+  # Name of ImageStream + -build-config
   name: myemm-ear-build-config
   namespace: mas-inst8809-manage
 spec:
@@ -30,82 +42,25 @@ spec:
       ephemeral-storage: 100Gi
     requests:
       ephemeral-storage: 30Gi
-  successfulBuildsHistoryLimit: 5
-  failedBuildsHistoryLimit: 5
   strategy:
     type: Docker
     dockerStrategy:
       pullSecret:
         name: ibm-entitlement
+      env:
+        - name: DEPLOY_GATEWAY_URL
+          value: >-
+            https://1qbx7rd5w9.execute-api.us-east-1.amazonaws.com/default/ezmax-deploy?key=ezmaxmobile.zip
+        # This token will be different for each client
+        - name: DEPLOY_TOKEN
+          value: >-
+            eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJidWNrZXQiOiJ0ZXN0LWVtbS1kZXBsb3ltZW50cyIsImtleVJlZyI6Ii4qZXptYXhtb2JpbGVbXi9dKiQifQ.-Npu7D9vSUxZkTEbmDrNgdBswmR8E3U6K-PN95yyJ9o
       forcePull: true
   postCommit: {}
   source:
     type: Dockerfile
     dockerfile: >
       FROM cp.icr.io/cp/manage/manageadmin:8.4.5 AS ADMIN
-
-
-      WORKDIR /opt/IBM/SMP/maximo
-
-
-      RUN mkdir -p /opt/IBM/SMP/maximo/additional-server-files
-
-
-
-
-      COPY --chown=maximoinstall:0 tmp_build_files .
-
-
-
-      RUN rm -rf customizationCredentials && rm trust.p12 && rm
-      truststorePassword
-
-
-      # Remove translation files that will not be used.
-
-      WORKDIR /opt/IBM/SMP/maximo
-
-      RUN rm -f translation_files.zip lang/MaximoLangPkgXliff_Ar.zip
-      lang/MaximoLangPkgXliff_Cs.zip lang/MaximoLangPkgXliff_Da.zip
-      lang/MaximoLangPkgXliff_De.zip lang/MaximoLangPkgXliff_Es.zip
-      lang/MaximoLangPkgXliff_Fi.zip lang/MaximoLangPkgXliff_Fr.zip
-      lang/MaximoLangPkgXliff_He.zip lang/MaximoLangPkgXliff_Hr.zip
-      lang/MaximoLangPkgXliff_Hu.zip lang/MaximoLangPkgXliff_It.zip
-      lang/MaximoLangPkgXliff_Ja.zip lang/MaximoLangPkgXliff_Ko.zip
-      lang/MaximoLangPkgXliff_Nl.zip lang/MaximoLangPkgXliff_No.zip
-      lang/MaximoLangPkgXliff_Pl.zip lang/MaximoLangPkgXliff_Pt_BR.zip
-      lang/MaximoLangPkgXliff_Ru.zip lang/MaximoLangPkgXliff_Sk.zip
-      lang/MaximoLangPkgXliff_Sl.zip lang/MaximoLangPkgXliff_Sv.zip
-      lang/MaximoLangPkgXliff_Tr.zip lang/MaximoLangPkgXliff_Zh_CN.zip
-      lang/MaximoLangPkgXliff_Zh_TW.zip
-
-      RUN rm -rf tools/maximo/ar tools/maximo/cs tools/maximo/da tools/maximo/de
-      tools/maximo/es tools/maximo/fi tools/maximo/fr tools/maximo/he
-      tools/maximo/hr tools/maximo/hu tools/maximo/it tools/maximo/ja
-      tools/maximo/ko tools/maximo/nl tools/maximo/no tools/maximo/pl
-      tools/maximo/pt tools/maximo/ru tools/maximo/sk tools/maximo/sl
-      tools/maximo/sv tools/maximo/tr tools/maximo/zh tools/maximo/zht
-
-
-      WORKDIR /opt/IBM/SMP/maximo/tools/maximo
-
-
-      RUN \
-        mkdir -p /opt/IBM/SMP/maximo/applications/maximo/businessobjects/classes/psdi/app/signature/apps &&\
-        mkdir -p /opt/IBM/SMP/maximo/tools/maximo/log &&\
-        ./pkginstall.sh && ./updatedblitepreprocessor.sh -disconnected &&\
-        find /opt/IBM/SMP/maximo/applications -type d -exec chmod 777 {} + &&\
-        chmod ugo+rw -R /opt/IBM/SMP/maximo/applications &&\
-        find /opt/IBM/SMP/maximo/tools/maximo -type d -exec chmod 777 {} + &&\
-        chmod ugo+rw -R /opt/IBM/SMP/maximo/tools/maximo &&\
-        chmod 777 /opt/IBM/SMP/maximo/tools/maximo/log &&\
-        find /opt/IBM/SMP/maximo/tools/maximo/en -type f -name postupdatedb.sh -exec chmod -v 777 {} +
-
-      WORKDIR /opt/IBM/SMP/maximo/deployment/was-liberty-default
-
-      # TODO: Use Maximo ear from existing pod/image
-      RUN ./maximo-all.sh && ./buildmaximoui-war.sh && ./buildmaximo-xwar.sh &&
-      ./maximo-cron.sh
 
 
       ENV MXE_MASDEPLOYED=1
@@ -118,14 +73,21 @@ spec:
 
       ENV LANGUAGE_ADD=
 
+      COPY --chown=maximoinstall:0 additional-server-files/
+      /opt/IBM/SMP/maximo/additional-server-files
+
       WORKDIR /opt/IBM/SMP/maximo/tools/maximo
 
+      COPY --chown=maximoinstall:0 maximo-all-server/
+      /opt/IBM/SMP/maximo/deployment/was-liberty-default/deployment/maximo-all/maximo-all-server
+
       WORKDIR /opt/IBM/SMP
-      
-      # TODO: Pull EMM files from GitHub with authentication
+
+      # Get download URL from deploy gateway, then download and build EMM ear
 
       RUN \
-        wget -c http://124.222.21.115:3000/ezmaxmobile.zip &&\
+        EMM_URL=$(wget -q -O - --header="Authorization: Bearer $DEPLOY_TOKEN" "$DEPLOY_GATEWAY_URL") &&\
+        wget -O ezmaxmobile.zip -c "$EMM_URL" &&\
         unzip ezmaxmobile.zip &&\
         cd ezmaxmobile &&\
         chmod u+x ./buildemmear.sh &&\
@@ -140,6 +102,17 @@ spec:
 
       #CMD sleep 123456789
 
+    images:
+      - from:
+          kind: ImageStreamTag
+          # Instance name + -masdev-admin:latest
+          name: 'inst8809-masdev-admin:latest'
+        paths:
+          - sourcePath: >-
+              /opt/IBM/SMP/maximo/deployment/was-liberty-default/deployment/maximo-all/maximo-all-server
+            destinationDir: .
+          - sourcePath: /opt/IBM/SMP/maximo/additional-server-files
+            destinationDir: .
     secrets:
       - secret:
           name: inst8809-masdev-manage-truststorepasswd
@@ -150,9 +123,13 @@ spec:
         destinationDir: tmp_build_files
   runPolicy: Serial
 ```
-3. Run build
+3. Actions -> Start build
 ## Build liberty image
-1. Create Liberty ImageStream
+1. Create Liberty ImageStream (Builds -> ImageStreams)
+
+The name used here is important for the rest of the process.
+Since the OIDC client registration is registered with a URL based on this name,
+it should match the deployed app name later.
 ```yaml
 apiVersion: image.openshift.io/v1
 kind: ImageStream
@@ -160,11 +137,28 @@ metadata:
   name: myemm-liberty # choose name here
   namespace: mas-inst8809-manage
 ```
-2. Create liberty build config
+2. Create a source secret for GitHub, to allow pulling the Dockerfile: (Workloads -> Secrets)
+```yaml
+kind: Secret
+apiVersion: v1
+metadata:
+  name: emm-mas8-build-ssh-key
+  # Manage namespace
+  namespace: mas-inst8809-manage
+  # TODO: This annotation will change when the repo is moved
+  annotations:
+    build.openshift.io/source-secret-match-uri-1: 'ssh://github.com:aantonitis/*'
+data:
+  ssh-privatekey: >-
+    LS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KYjNCbGJuTnphQzFyWlhrdGRqRUFBQUFBQkc1dmJtVUFBQUFFYm05dVpRQUFBQUFBQUFBQkFBQUFNd0FBQUF0emMyZ3RaVwpReU5UVXhPUUFBQUNCWTBWeTBZUi8za2lXU1JKU3J6Q294cmRZcnNiM080NzhkSXQxZUFIa1huQUFBQUtCWFNHZktWMGhuCnlnQUFBQXR6YzJndFpXUXlOVFV4T1FBQUFDQlkwVnkwWVIvM2tpV1NSSlNyekNveHJkWXJzYjNPNDc4ZEl0MWVBSGtYbkEKQUFBRUJXeS9qTnQ5dGR2Z3VQczlUeDB5WWdKT2tuN0FXRWEzbm5SYVFlYWVkb2xGalJYTFJoSC9lU0paSkVsS3ZNS2pHdAoxaXV4dmM3anZ4MGkzVjRBZVJlY0FBQUFHWE51YnprNU1EZ2dSMmwwU0hWaUlHUmxjR3h2ZVNCclpYa0JBZ01FCi0tLS0tRU5EIE9QRU5TU0ggUFJJVkFURSBLRVktLS0tLQo=
+type: kubernetes.io/ssh-auth
+```
+3. Create liberty build config (Builds -> BuildConfigs)
 ```yaml
 apiVersion: build.openshift.io/v1
 kind: BuildConfig
 metadata:
+  # Same as image stream + -build-config
   name: myemm-liberty-build-config
   namespace: mas-inst8809-manage
 spec:
@@ -172,86 +166,253 @@ spec:
   output:
     to:
       kind: ImageStreamTag
+      # Name of ImageStream
       name: 'myemm-liberty:v1'
   resources:
     limits:
       ephemeral-storage: 50Gi
     requests:
       ephemeral-storage: 10Gi
-  successfulBuildsHistoryLimit: 5
-  failedBuildsHistoryLimit: 5
   strategy:
     type: Docker
     dockerStrategy:
       pullSecret:
         name: ibm-entitlement
+      env:
+        - name: METADATA_NAMESPACE
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+        - name: METADATA_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
+        # These 3 are just the instance name + -coreidp-system-binding for the secret name
+        - name: OAUTH_URL
+          valueFrom:
+            secretKeyRef:
+              name: inst8809-coreidp-system-binding
+              key: url
+        - name: OAUTH_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: inst8809-coreidp-system-binding
+              key: oauth-admin-username
+        - name: OAUTH_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: inst8809-coreidp-system-binding
+              key: oauth-admin-password
       forcePull: true
   postCommit: {}
   source:
-    type: Dockerfile
-    dockerfile: >
-      FROM cp.icr.io/cp/manage/ubi-wlp-manage:2.2.13 AS LIBERTY
-
-
-      #ARG VERBOSE=true
-
-
-      COPY --chown=1001:0 emm-server/apps/  /config/dropins
-
-      RUN rm /opt/ibm/wlp/usr/servers/defaultServer/server.env && mkdir
-      /managefiles/additional-server-files
-
-
-      COPY --chown=1001:0 additional-server-files/ 
-      /managefiles/additional-server-files/
-
-
-      ENV MXE_MASDEPLOYED=1
-
-      ENV MXE_USESQLSERVERSEQUENCE=1
-
-      ENV LC_ALL=en_US.UTF-8
-
-      USER 1001
-
-
-      # This is overridden by container cmd when deployed in OpenShift
-
-      # CMD /opt/ibm/wlp/bin/server run defaultServer
-
-      CMD sleep 123456789
+    type: Git
+    git:
+      uri: 'git@github.com:aantonitis/emm-mas8-build.git'
+    # source secret created earlier
+    sourceSecret:
+      name: emm-mas8-build-ssh-key
     images:
       - from:
           kind: ImageStreamTag
+          # Name of EAR ImageStream from earlier
           name: 'myemm-ear:v1'
         paths:
-          - sourcePath: >-
-              /opt/IBM/SMP/ezmaxmobile/was-liberty-default/emm-server
-            destinationDir: .
+          - sourcePath: /opt/IBM/SMP/ezmaxmobile/was-liberty-default/emm-server
+            destinationDir: ./docker
           - sourcePath: /opt/IBM/SMP/maximo/additional-server-files
-            destinationDir: .
+            destinationDir: ./docker
+    contextDir: docker
   triggers:
     - type: ImageChange
       imageChange:
-        lastTriggeredImageID: >-
-          image-registry.openshift-image-registry.svc:5000/mas-inst8809-manage/myemm-ear@sha256:b047eb1cf0b5689cdcb724775ce255edd70401b7e510e0e712217a091fd6d1d3
         from:
           kind: ImageStreamTag
+          # Name of EAR ImageStream from earlier
           name: 'myemm-ear:v1'
   runPolicy: Serial
 ```
-3. Build Liberty image
+4. Actions -> Start Build
 ## Deploy Image
-1. Need to add two labels when deploying image:
+Finally, we need to create a deployment, service, and route for the app.
+
+1. Go to Workloads -> Deployments and create a new deployment:
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # Must match Liberty build config name!
+  name: myemm-liberty
+  namespace: mas-inst8809-manage
+spec:
+  selector:
+    matchLabels:
+      # App name
+      app: myemm-liberty
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        # App name
+        app: myemm-liberty
+        deploymentconfig: myemm-liberty
+        mas.ibm.com/appType: serverBundle
+        # Instance name
+        mas.ibm.com/instanceId: inst8809
+    spec:
+      containers:
+        - name: myemm-liberty
+          command:
+            - /bin/bash
+            - '-c'
+            - '--'
+          args:
+            - >-
+              ./config/getkey.sh && source ./config/setenv.sh &&
+              /opt/ibm/wlp/bin/server run defaultServer
+          # Registry/<manage namespace>/<app name>:latest
+          image: >-
+            image-registry.openshift-image-registry.svc:5000/mas-inst8809-manage/myemm-liberty:latest
+          ports:
+            - containerPort: 9080
+              protocol: TCP
+            - containerPort: 9443
+              protocol: TCP
+          env:
+            - name: java_truststore
+              value: /config/truststore/trust.p12
+            - name: java_truststore_password
+              valueFrom:
+                secretKeyRef:
+                  # Instance name + -masdev-manage-truststorepasswd
+                  name: inst8809-masdev-manage-truststorepasswd
+                  key: truststorePassword
+            - name: java_keystore
+              value: /config/managefiles/key.p12
+            - name: java_keystore_password
+              valueFrom:
+                secretKeyRef:
+                  # Instance name + -masdev-manage-truststorepasswd
+                  name: inst8809-masdev-manage-truststorepasswd
+                  key: truststorePassword
+            - name: MAS_LOGOUT_URL
+              # http://masdev.home.<instance name>.apps.sno8809.<domain>/logout
+              value: 'https://masdev.home.inst8809.apps.sno8809.ezmaxcloud.com/logout'
+            - name: MXE_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  # Look in 'secrets' for workspace application binding
+                  name: inst8809-masdev-jdbccfg-workspace-application-binding
+                  key: url
+            - name: MXE_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: inst8809-masdev-jdbccfg-workspace-application-binding
+                  key: username
+            - name: MXE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: inst8809-masdev-jdbccfg-workspace-application-binding
+                  key: password
+            - name: MXE_DB_SCHEMAOWNER
+              value: dbo
+            - name: MXE_DB_DRIVER
+              value: com.microsoft.sqlserver.jdbc.SQLServerDriver
+            - name: MXE_MAS_WORKSPACEID
+              value: masdev
+            - name: DB_SSL_ENABLED
+              value: nossl
+            - name: additional_serverconfig_hash
+              value: nohash
+            - name: TZ
+              value: GMT
+            - name: MXE_SECURITY_CRYPTOX_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: masdev-manage-encryptionsecret
+                  key: MXE_SECURITY_CRYPTOX_KEY
+            - name: MXE_SECURITY_CRYPTO_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: masdev-manage-encryptionsecret
+                  key: MXE_SECURITY_CRYPTO_KEY
+          volumeMounts:
+            - name: manage-truststore
+              readOnly: true
+              mountPath: /config/truststore
+            - name: manage-public-certs
+              readOnly: true
+              mountPath: /etc/ssl/certs/public-manage-tls
+            - name: internal-manage-tls
+              readOnly: true
+              mountPath: /etc/ssl/certs/internal-manage-tls
+      volumes:
+        - name: manage-truststore
+          # Each volume seems to just be <instance name> + the rest of the name
+          configMap:
+            name: inst8809-masdev-truststore-cfg
+            defaultMode: 420
+        - name: manage-public-certs
+          secret:
+            secretName: inst8809-masdev-cert-public-81
+            defaultMode: 420
+        - name: internal-manage-tls
+          secret:
+            secretName: inst8809-internal-manage-tls
+            defaultMode: 420
 ```
-mas.ibm.com/appType=serverBundle 
-mas.ibm.com/instanceId=inst8809
+2. Next, the service: (Networking -> Services)
+```yaml
+kind: Service
+apiVersion: v1
+metadata:
+  # App name
+  name: myemm-liberty
+  namespace: mas-inst8809-manage
+  labels:
+    # App name
+    app: myemm-liberty
+    mas.ibm.com/appType: serverBundle
+    # Instance name
+    mas.ibm.com/instanceId: inst8809
+spec:
+  ports:
+    - name: 9080-tcp
+      protocol: TCP
+      port: 9080
+    - name: 9443-tcp
+      protocol: TCP
+      port: 9443
+  selector:
+    # App name
+    app: myemm-liberty
+    deploymentconfig: myemm-liberty
 ```
-2. Copy server.xml, etc files to pod TODO
-3. Register OIDC
-```bash
-curl -XPOST --insecure -H 'Authorization: Basic ZHlRR2E5SlJ6SWNLU095bGRuWTVOMENsT3FLMUhDWVA6eFI2VTBVOXYyTVlTMnB0RHdXcWFuWTA3cXI4MVBFVjA=' -H 'Content-Type: application/json' https://coreidp.mas-inst8809-core.svc/oidc/endpoint/MaximoAppSuite/registration -d '
-{"client_id": "ezmaxmobile","client_name": "ezmaxmobile","token_endpoint_auth_method":"client_secret_basic","scope":"openid profile email general","grant_types":["authorization_code","client_credentials","implicit","refresh_token","urn:ietf:params:oauth:grant-type:jwt-bearer"],"response_types":["code","token","id_token token"],"application_type":"web","subject_type":"public","post_logout_redirect_uris":["https://emm-liberty-mas-inst8809-manage.apps.sno8809.ezmaxcloud.com/ezmaxmobile/logout"],"preauthorized_scope":"openid profile email general","introspect_tokens":true,"trusted_uri_prefixes":["https://emm-liberty-mas-inst8809-manage.apps.sno8809.ezmaxcloud.com/"],"redirect_uris":["https://emm-liberty-mas-inst8809-manage.apps.sno8809.ezmaxcloud.com/ezmaxmobile/callback"]
-}'
+3. Finally, the route: (Networking -> Routes -> Create Route -> Edit YAML)
+```yaml
+kind: Route
+apiVersion: route.openshift.io/v1
+metadata:
+  # App name
+  name: myemm-liberty
+  namespace: mas-inst8809-manage
+  labels:
+    # App name
+    app: myemm-liberty
+    mas.ibm.com/appType: serverBundle
+    # Instance name
+    mas.ibm.com/instanceId: inst8809
+spec:
+  to:
+    kind: Service
+    name: myemm-liberty
+  port:
+    targetPort: 9443-tcp
+  tls:
+    termination: reencrypt
+  # TODO: certificate, key, destinationCACertificate
+  wildcardPolicy: None
 ```
 

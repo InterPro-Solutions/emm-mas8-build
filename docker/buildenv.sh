@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Build environment variables needed later in deployment
+# Also, register an OIDC client and store the secret, etc for later
+
 set -e # Exit on nonzero status
 set -x # Trace TODO: DEBUG
 #METADATA_NAME=myemm2-liberty-build-config-14 # TODO: DEBUG
@@ -71,6 +74,7 @@ APP_URL=$APP_URL
 DOMAIN_NAME=$DOMAIN_NAME
 CORE_NAMESPACE=$CORE_NAMESPACE
 EOF
+# Prepend environment variables to setenv
 cat << EOF > setenv2.sh
 #!/bin/bash
 set -a
