@@ -5,9 +5,9 @@
 
 set -e # Exit on nonzero status
 set -x # Trace TODO: DEBUG
-#METADATA_NAME=myemm2-liberty-build-config-14 # TODO: DEBUG
-#METADATA_NAMESPACE=mas-inst8809-manage # TODO: DEBUG
-#OAUTH_URL=https://auth.inst8809.apps.sno8809.ezmaxcloud.com/oidc/endpoint/MaximoAppSuite # TODO: DEBUG
+#: ${METADATA_NAME:=myemm2-liberty-build-config-14} # TODO: DEBUG
+#: ${METADATA_NAMESPACE:=mas-inst8809-manage} # TODO: DEBUG
+#: ${OAUTH_URL:=https://auth.inst8809.apps.sno8809.ezmaxcloud.com/oidc/endpoint/MaximoAppSuite} # TODO: DEBUG
 # Set app ID by cutting off the build config suffix
 : ${METADATA_NAME:?}
 : ${METADATA_NAMESPACE:?}
@@ -18,16 +18,29 @@ DOMAIN_NAME=$(echo ${OAUTH_URL:?} | sed -e 's/^https:\/\/auth\.\([^\/]*\).*/\1/;
 APPS_DOMAIN_NAME=$(echo $DOMAIN_NAME | sed -e 's/.*\(apps.*\)/\1/;t;q1') || echo "Error: Could not find 'apps' base"
 
 # Try and get core namespace for later
-# -n suppress printing mattern space; p prints only if a match occurred
+# -n suppress printing; p prints only if match
 CORE_NAMESPACE=$(echo ${METADATA_NAMESPACE:?} | sed -ne 's/-manage$/-core/p')
 
 # OIDC Client Registration
 # Build app url from namespace, app_id, and apps domain name
 APP_URL="https://$APP_ID-$METADATA_NAMESPACE.$APPS_DOMAIN_NAME"
-# Write registration JSON to file using Bash heredoc
+CLIENT_ID=${APP_ID:?}
+# Basic user auth
+OAUTH_BASIC="${OAUTH_USERNAME:?}:${OAUTH_PASSWORD:?}"
+# Modify client if it exists, otherwise create a new one
+oidc_status=$(curl -kw '%{http_code}' -o oidcreg.json -u "${OAUTH_BASIC:?}" "$OAUTH_URL/registration/${CLIENT_ID:?}")
+if [[ "$oidc_status" == 200 ]]; then
+  method="PUT"
+  reg_url="$OAUTH_URL/registration/$CLIENT_ID"
+else
+  method="POST"
+  reg_url="$OAUTH_URL/registration"
+fi
+# Use bash heredoc to write reg info
 cat << EOF > oidcreg.json
 {
 "client_name": "ezmaxmobile",
+"client_id": "$CLIENT_ID",
 "token_endpoint_auth_method": "client_secret_basic",
 "scope": "openid profile email general",
 "redirect_uris": ["$APP_URL/ezmaxmobile", "$APP_URL/oidcclient/redirect/oidc"],
@@ -41,19 +54,19 @@ cat << EOF > oidcreg.json
 "trusted_uri_prefixes": ["$APP_URL/"]
 }
 EOF
-# Register
-curl -X POST --insecure --fail -u "${OAUTH_USERNAME:?}:${OAUTH_PASSWORD:?}" -H 'Content-Type: application/json' ${OAUTH_URL:?}/registration -d @oidcreg.json > oidcresp.json
+# Add/change registration
+curl -kfX ${method:?} -u "$OAUTH_BASIC" -H 'Content-Type: application/json' ${reg_url:?} -d @oidcreg.json > oidcres.json
 # TODO: DEBUG
-#cat << EOF > oidcresp.json
+#cat << EOF > oidcres.json
 #{
 #"client_id": "bar", "client_secret" : "foo",
 #"client_secret": "baz",
 #}
 #EOF
 # Extract client id & secret from OIDC response
-CLIENT_SECRET=$(grep -Pio -m 1 '"CLIENT_SECRET"\s*:\s*"[^,"]*' oidcresp.json | sed -e 's/.*:\s*"//')
+CLIENT_SECRET=$(grep -Pio -m 1 '"CLIENT_SECRET"\s*:\s*"[^,"]*' oidcres.json | sed -e 's/.*:\s*"//')
 : ${CLIENT_SECRET:?}
-CLIENT_ID=$(grep -Pio -m 1 '"CLIENT_ID"\s*:\s*"[^,"]*' oidcresp.json | sed -e 's/.*:\s*"//')
+CLIENT_ID=$(grep -Pio -m 1 '"CLIENT_ID"\s*:\s*"[^,"]*' oidcres.json | sed -e 's/.*:\s*"//')
 : ${CLIENT_ID:?}
 
 # Export environment variables
