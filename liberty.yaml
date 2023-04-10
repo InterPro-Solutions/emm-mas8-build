@@ -53,7 +53,7 @@ spec:
   source:
     type: Git
     git:
-      uri: 'git@github.com:aantonitis/emm-mas8-build.git'
+      uri: 'git@github.com:InterPro-Solutions/emm-mas8-build.git'
     # source secret created earlier
     sourceSecret:
       name: emm-mas8-build-ssh-key

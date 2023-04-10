@@ -145,9 +145,8 @@ metadata:
   name: emm-mas8-build-ssh-key
   # Manage namespace
   namespace: mas-inst8809-manage
-  # TODO: This annotation will change when the repo is moved
   annotations:
-    build.openshift.io/source-secret-match-uri-1: 'ssh://github.com:aantonitis/*'
+    build.openshift.io/source-secret-match-uri-1: 'ssh://github.com:InterPro-Solutions/*'
 data:
   ssh-privatekey: >-
     LS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KYjNCbGJuTnphQzFyWlhrdGRqRUFBQUFBQkc1dmJtVUFBQUFFYm05dVpRQUFBQUFBQUFBQkFBQUFNd0FBQUF0emMyZ3RaVwpReU5UVXhPUUFBQUNCWTBWeTBZUi8za2lXU1JKU3J6Q294cmRZcnNiM080NzhkSXQxZUFIa1huQUFBQUtCWFNHZktWMGhuCnlnQUFBQXR6YzJndFpXUXlOVFV4T1FBQUFDQlkwVnkwWVIvM2tpV1NSSlNyekNveHJkWXJzYjNPNDc4ZEl0MWVBSGtYbkEKQUFBRUJXeS9qTnQ5dGR2Z3VQczlUeDB5WWdKT2tuN0FXRWEzbm5SYVFlYWVkb2xGalJYTFJoSC9lU0paSkVsS3ZNS2pHdAoxaXV4dmM3anZ4MGkzVjRBZVJlY0FBQUFHWE51YnprNU1EZ2dSMmwwU0hWaUlHUmxjR3h2ZVNCclpYa0JBZ01FCi0tLS0tRU5EIE9QRU5TU0ggUFJJVkFURSBLRVktLS0tLQo=
@@ -210,7 +209,7 @@ spec:
   source:
     type: Git
     git:
-      uri: 'git@github.com:aantonitis/emm-mas8-build.git'
+      uri: 'git@github.com:InterPro-Solutions/emm-mas8-build.git'
     # source secret created earlier
     sourceSecret:
       name: emm-mas8-build-ssh-key
