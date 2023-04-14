@@ -307,8 +307,9 @@ cert_public=$(echo "$secrets" | grep -Pm 1 "\-cert-public-" || promptuser "cert-
 internal_manage_tls=$(echo "$secrets" | grep -Pm 1 "\-internal-manage-tls" || promptuser "internal_manage_tls Secret")
 # Fetch MAS_LOGOUT_URL by reading the environment of the -masdev-all deployment
 deployments=$(oc get deployments -l mas.ibm.com/appType=serverBundle -oname | sed -e 's/^.*\///') # remove leading '***/')
+# TODO: Try other masdev instances
 masdev_deploy=$(echo "$deployments" | grep -Pm 1 "\-masdev-all" || promptuser "masdev-all Deployment")
-deploy_env=$(oc set env deployment/inst8809-masdev-all --list)
+deploy_env=$(oc set env deployment/$masdev_deploy --list)
 mas_logout_url=$(echo "$deploy_env" | grep -Piom 1 'MAS_LOGOUT_URL=\S+' | sed -ne 's/MAS_LOGOUT_URL=//ip' || promptuser "MAS_LOGOUT_URL")
 
 # 3.2 Create deployment config
