@@ -27,6 +27,7 @@ if [[ $(oc auth can-i '*' '*') != 'yes' ]]; then echo "Insufficient permissions 
 namespaces=$(oc get namespaces -oname | sed -e 's/^.*\///')
 core_namespace=$(echo "$namespaces" | grep -Pm 1 "\-core$" || promptuser "Core namespace")
 manage_namespace=$(echo "$namespaces" | grep -Pm 1 "\-manage$" || promptuser "Manage namespace")
+instance_id=$(echo $core_namespace | grep -Po -- "(?<=-).*(?=-)" || promptuser "Workspace/instance ID")
 echo "This script will install EZMaxMobile into your OpenShift Cluster."
 echo "Core namespace: $core_namespace"
 echo "Manage namespace: $manage_namespace"
@@ -35,6 +36,7 @@ echo "Manage namespace: $manage_namespace"
 # 1.1 Switch to manage namespace and create EMM EAR ImageStream
 oc project "$manage_namespace"
 imagestreams=$(oc get imagestreams -oname | sed -e 's/^.*\///') # remove leading '***/'
+applicationid=$(echo "$imagestreams" | grep -Pom 1 "(?<=$instance_id-).*(?=-admin)" || promptuser "masdev application ID")
 emm_ear=$(echo "$imagestreams" | grep -Pm 1 "$DEFAULT_EMM_EAR" || true)
 # Matching EAR found; prompt to use it
 if [[ -n "$emm_ear" ]]; then
@@ -56,7 +58,7 @@ echo "EMM EAR image: $emm_ear"
 
 # 1.2 Create EMM EAR BuildConfig
 # 1.2.1 Find masdev image
-masdev_image=$(echo "$imagestreams" | grep -Pm 1 "\-masdev-admin" || promptuser "masdev-admin ImageStream")
+masdev_image=$(echo "$imagestreams" | grep -Pm 1 "\-$applicationid-admin" || promptuser "$applicationid-admin ImageStream")
 echo "masdev image: $masdev_image"
 # 1.2.2 Find image secrets & ConfigMaps
 echo "Discovering secrets/configuration for EMM EAR build..."
@@ -70,6 +72,7 @@ deploy_package="ezmaxmobile.zip"
 deploy_token='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJidWNrZXQiOiJ0ZXN0LWVtbS1kZXBsb3ltZW50cyIsImtleVJlZyI6Ii4qZXptYXhtb2JpbGVbXi9dKiQifQ.-Npu7D9vSUxZkTEbmDrNgdBswmR8E3U6K-PN95yyJ9o'
 echo "EMM deploy package: $deploy_package"
 # TODO: Prompt for deploy token
+#cat << EOF > test.yaml
 oc apply -f- << EOF
 kind: BuildConfig
 apiVersion: build.openshift.io/v1
@@ -159,7 +162,6 @@ spec:
             destinationDir: .
     secrets:
       - secret:
-          # TODO: DEBUG
           name: $truststorepasswd
         destinationDir: tmp_build_files
     configMaps:
@@ -300,17 +302,16 @@ EOF
 # 3.1 Gather labels, secrets for deployment
 echo "Discovering secrets/configuration for EMM deployment..."
 deployments=$(oc get deployments --show-labels=true)
-# Find instanceId by scanning deployment labels
-instance_id=$(echo "$deployments" | grep -Piom 1 'instanceId=[^,]+' | sed -ne 's/instanceId=//ip' || promptuser "instanceId")
-app_binding=$(echo "$secrets" | grep -Pm 1 "\-workspace-application-binding" || promptuser "workspace-application-binding Secret")
+#instance_id=$(echo "$deployments" | grep -Piom 1 'instanceId=[^,]+' | sed -ne 's/instanceId=//ip' || promptuser "instanceId")
+app_binding=$(echo "$secrets" | grep -Pm 1 "\-workspace-(application-)?binding" || promptuser "-workspace-binding Secret")
 cert_public=$(echo "$secrets" | grep -Pm 1 "\-cert-public-" || promptuser "cert-public Secret")
 internal_manage_tls=$(echo "$secrets" | grep -Pm 1 "\-internal-manage-tls" || promptuser "internal_manage_tls Secret")
-# Fetch MAS_LOGOUT_URL by reading the environment of the -masdev-all deployment
+# Fetch MAS_LOGOUT_URL & MXE_DB_DRIVER by reading the environment of the -masdev-* serverBundle deployment
 deployments=$(oc get deployments -l mas.ibm.com/appType=serverBundle -oname | sed -e 's/^.*\///') # remove leading '***/')
-# TODO: Try other masdev instances
-masdev_deploy=$(echo "$deployments" | grep -Pm 1 "\-masdev-all" || promptuser "masdev-all Deployment")
+masdev_deploy=$(echo "$deployments" | grep -Pm 1 "\-masdev-[\w-]+$" || promptuser "$applicationid-all Deployment")
 deploy_env=$(oc set env deployment/$masdev_deploy --list)
-mas_logout_url=$(echo "$deploy_env" | grep -Piom 1 'MAS_LOGOUT_URL=\S+' | sed -ne 's/MAS_LOGOUT_URL=//ip' || promptuser "MAS_LOGOUT_URL")
+mas_logout_url=$(echo "$deploy_env" | grep -Piom 1 '(?<=MAS_LOGOUT_URL=)\S+' || promptuser "MAS_LOGOUT_URL")
+mxe_db_driver=$(echo "$deploy_env" | grep -Piom 1 '(?<=MXE_DB_DRIVER=)\S+' || promptuser "MXE_DB_DRIVER environment variable")
 
 # 3.2 Create deployment config
 echo "Deploying EZMaxMobile..."
@@ -387,9 +388,9 @@ spec:
             - name: MXE_DB_SCHEMAOWNER
               value: dbo
             - name: MXE_DB_DRIVER
-              value: com.microsoft.sqlserver.jdbc.SQLServerDriver
+              value: $mxe_db_driver
             - name: MXE_MAS_WORKSPACEID
-              value: masdev
+              value: $applicationid
             - name: DB_SSL_ENABLED
               value: nossl
             - name: additional_serverconfig_hash
@@ -399,12 +400,12 @@ spec:
             - name: MXE_SECURITY_CRYPTOX_KEY
               valueFrom:
                 secretKeyRef:
-                  name: masdev-manage-encryptionsecret
+                  name: $applicationid-manage-encryptionsecret
                   key: MXE_SECURITY_CRYPTOX_KEY
             - name: MXE_SECURITY_CRYPTO_KEY
               valueFrom:
                 secretKeyRef:
-                  name: masdev-manage-encryptionsecret
+                  name: $applicationid-manage-encryptionsecret
                   key: MXE_SECURITY_CRYPTO_KEY
           volumeMounts:
             - name: manage-truststore
@@ -459,7 +460,7 @@ EOF
 # 3.4 Get Route cert info
 # Fetch Cert info from Manage's Route
 routes=$(oc get route -l mas.ibm.com/applicationId=manage -oname | sed -e 's/^.*\///') # remove leading '***/')
-masdev_route=$(echo "$routes" | grep -Pm 1 "\-manage-masdev" || promptuser "manage-masdev Route")
+masdev_route=$(echo "$routes" | grep -Pm 1 "\-manage-$applicationid" || promptuser "manage-$applicationid Route")
 route_cert=$(oc get route "$masdev_route" -o custom-columns=:.spec.tls.certificate --no-headers=true)
 if [[ "$route_cert" == "<none>" ]]; then echo "Error: Could not find route certificate" && exit 1; fi
 route_key=$(oc get route "$masdev_route" -o custom-columns=:.spec.tls.key --no-headers=true)
@@ -498,6 +499,5 @@ $(echo "$route_dest_cert" | sed 's/^/      /')
 EOF
 oc rollout status deployment $emm_liberty --watch --timeout=20m
 echo "Successfully deployed EZMaxmobile. Deployment name: $emm_liberty"
-#set -x # TODO: DEBUG
 set +x
 set +e
