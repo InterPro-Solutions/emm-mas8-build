@@ -4,6 +4,8 @@ This guide, and the script that accompanies it, were originally based off of Fan
 This guide will install EZMaxMobile into an OpenShift Cluster via the OpenShift CLI.
 ## (Windows) Install Git Bash
 A bash environment is required to run the installation script. On Windows, this can be installed via [Git Bash](https://git-scm.com/downloads).
+## OpenShift CLI
+To run the script, the OpenShift CLI executable must be used, found [here](https://docs.openshift.com/container-platform/4.12/cli_reference/openshift_cli/getting-started-cli.html).
 ## Download script
 Download the [EMM installation script](emm_install.sh).
 

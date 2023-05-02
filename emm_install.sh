@@ -40,8 +40,7 @@ applicationid=$(echo "$imagestreams" | grep -Pom 1 "(?<=$instance_id-).*(?=-admi
 emm_ear=$(echo "$imagestreams" | grep -Pm 1 "$DEFAULT_EMM_EAR" || true)
 # Matching EAR found; prompt to use it
 if [[ -n "$emm_ear" ]]; then
-  read -p "Use EMM EAR image name '$emm_ear'? [Y/n]: " -rn 1
-  echo
+  read -p "Use EMM EAR image name '$emm_ear'? [Y/n]: " -r
   # Prompt for name if no
   if [[ $REPLY =~ ^[Nn]$ ]]; then
     read -p "Enter OPTIONAL name for EMM EAR [$DEFAULT_EMM_EAR]: " -r
@@ -72,6 +71,9 @@ deploy_package="ezmaxmobile.zip"
 deploy_token='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJidWNrZXQiOiJ0ZXN0LWVtbS1kZXBsb3ltZW50cyIsImtleVJlZyI6Ii4qZXptYXhtb2JpbGVbXi9dKiQifQ.-Npu7D9vSUxZkTEbmDrNgdBswmR8E3U6K-PN95yyJ9o'
 echo "EMM deploy package: $deploy_package"
 # TODO: Prompt for deploy token
+# Backslash followed by newline is broken inside subshell heredocs, so use a function instead.
+# See https://unix.stackexchange.com/a/534078
+apply_ear_config() {
 #cat << EOF > test.yaml
 oc apply -f- << EOF
 kind: BuildConfig
@@ -126,8 +128,10 @@ spec:
 
       WORKDIR /opt/IBM/SMP/maximo/tools/maximo
 
-      COPY --chown=maximoinstall:0 maximo-all-server/
-      /opt/IBM/SMP/maximo/deployment/was-liberty-default/deployment/maximo-all/maximo-all-server
+      # TODO: Discover maximo-all or maximo-ui (or both)
+
+      COPY --chown=maximoinstall:0 deployment/
+      /opt/IBM/SMP/maximo/deployment/was-liberty-default/deployment
 
       WORKDIR /opt/IBM/SMP
 
@@ -139,11 +143,13 @@ spec:
         unzip ezmaxmobile.zip &&\\
         cd ezmaxmobile &&\\
         chmod u+x ./buildemmear.sh &&\\
+        # TODO: Replace maximo-all in buildemmear.xml
+        # sed 's/maximo.ear"\\s*value=".*"/maximo.ear" value="foo"/g' ezmaxmobile/buildemmear.xml &&\\
         ./buildemmear.sh &&\\
         ls -al default &&\\
         ls -al was-liberty-default &&\\
         ls -al was-liberty-default/emm-server/apps &&\\
-        ls -al /opt/IBM/SMP/maximo/deployment/was-liberty-default/deployment/maximo-all/maximo-all-server &&\\
+        ls -al /opt/IBM/SMP/maximo/deployment/was-liberty-default/deployment &&\\
         ls -al /opt/IBM/SMP/maximo/additional-server-files
 
       WORKDIR /opt/IBM/SMP/maximo/tools/maximo
@@ -156,7 +162,7 @@ spec:
           name: "${masdev_image}:latest"
         paths:
           - sourcePath: >-
-              /opt/IBM/SMP/maximo/deployment/was-liberty-default/deployment/maximo-all/maximo-all-server
+              /opt/IBM/SMP/maximo/deployment/was-liberty-default/deployment
             destinationDir: .
           - sourcePath: /opt/IBM/SMP/maximo/additional-server-files
             destinationDir: .
@@ -172,16 +178,21 @@ spec:
   triggers:
     - type: ConfigChange
 EOF
-# 1.3 Build EMM EAR
-#oc start-build $ear_config --wait
+}
+apply_output=$(apply_ear_config)
+# 1.3 (Optional) Build EMM EAR
+# Build EAR only if config was changed (and not created)
+# This is needed because the ConfigChange trigger only builds on initial creation as of 2023-04-28
+if [[ -z "$(echo "$apply_output" | grep -Pm 1 'unchanged|created' || true)" ]]; then
+  oc start-build $ear_config --wait
+fi
 
 # 2. Create EMM Liberty image
 # 2.1 Get EMM Liberty image name
 emm_liberty=$(echo "$imagestreams" | grep -Pm 1 "$DEFAULT_LIBERTY_EAR" || true)
 # Matching EAR found; prompt to use it
 if [[ -n "$emm_liberty" ]]; then
-  read -p "Use EMM Liberty image name '$emm_liberty'? [Y/n]: " -rn 1
-  echo
+  read -p "Use EMM Liberty image name '$emm_liberty'? [Y/n]: " -r
   # Prompt for name if no
   if [[ $REPLY =~ ^[Nn]$ ]]; then
     read -p "Enter OPTIONAL name for EMM Liberty [$DEFAULT_LIBERTY_EAR]: " -r
@@ -217,7 +228,56 @@ source_secret=emm-mas8-build-ssh-key
 # 2.3.1 Gather config info (coreidp secrets etc)
 echo "Discovering secrets/configuration for EMM Liberty build..."
 coreidp_binding=$(echo "$secrets" | grep -Pm 1 "\-coreidp-system-binding" || promptuser "coreidp-system-binding Secret")
-# TODO: Register OIDC here
+## TODO: Register OIDC here
+#oauth_url=$(oc get secret $coreidp_binding --template='{{.data.url|base64decode}}')
+#oauth_username=$(oc get secret $coreidp_binding -o jsonpath="{.data['oauth-admin-username']}" | base64 -d)
+#oauth_password=$(oc get secret $coreidp_binding -o jsonpath="{.data['oauth-admin-password']}" | base64 -d)
+#domain_name=$(echo $oauth_url | grep -Pom 1 "(?<=https://auth.)[^/]*" || promptuser "domain name")
+#apps_domain_name=$(echo $domain_name | grep -Pom 1 "apps[^/]*" || promptuser "apps domain name")
+#app_url="https://$emm_liberty-$manage_namespace.$apps_domain_name"
+## Check for existing OAUTH secret for this app name
+#oauth_secret=$(echo "$secrets" | grep -Pm 1 "credentials-oauth-$emm_liberty" || true)
+## If not found, register OIDC and create secret
+#if [[ -z $oauth_secret ]]; then
+#  echo "Registering OIDC client..."
+#  oauth_basic="${oauth_username}:${oauth_password}"
+#  oidcres=$(
+#  #cat << EOF
+#  curl -kfX POST -u "$OAUTH_BASIC" -H 'Content-Type: application/json' "$OAUTH_URL/registration" -d@- << EOF
+#{
+#"client_name": "ezmaxmobile",
+#"client_id": "$emm_liberty",
+#"token_endpoint_auth_method": "client_secret_basic",
+#"scope": "openid profile email general",
+#"redirect_uris": ["$app_url/ezmaxmobile", "$app_url/oidcclient/redirect/oidc"],
+#"grant_types": ["authorization_code","client_credentials","implicit","refresh_token","urn:ietf:params:oauth:grant-type:jwt-bearer"],
+#"response_types": ["code","token","id_token token"],
+#"application_type": "web",
+#"subject_type":"public",
+#"post_logout_redirect_uris": ["$app_url/ezmaxmobile/logout"],
+#"preauthorized_scope": "openid profile email general",
+#"introspect_tokens": true,
+#"trusted_uri_prefixes": ["$app_url/"]
+#}
+#EOF
+#  )
+#  # Extract client secret from OIDC response
+#  client_secret=$(echo "$oidcres" | grep -Piom 1 '(?<="CLIENT_SECRET"\s*:\s*")[^,"]*')
+#  # Create secret
+#  oc create -f- << EOF
+#kind: Secret
+#apiVersion: v1
+#metadata:
+#  name: credentials-oauth-$emm_liberty
+#  namespace: $manage_namespace
+#data:
+#  password: $client_secret
+#  username: $emm_liberty
+#type: Opaque
+#EOF
+#  oauth_secret="credentials-oauth-$emm_liberty"
+#fi
+exit 0
 # 2.3.2 Create BuildConfig
 liberty_config=${emm_liberty}-build-config
 #cat << EOF > test.yaml
@@ -269,6 +329,8 @@ spec:
             secretKeyRef:
               name: $coreidp_binding
               key: oauth-admin-password
+        - name: APP_ID
+          value: $emm_liberty
       forcePull: true
   postCommit: {}
   source:
@@ -308,7 +370,7 @@ cert_public=$(echo "$secrets" | grep -Pm 1 "\-cert-public-" || promptuser "cert-
 internal_manage_tls=$(echo "$secrets" | grep -Pm 1 "\-internal-manage-tls" || promptuser "internal_manage_tls Secret")
 # Fetch MAS_LOGOUT_URL & MXE_DB_DRIVER by reading the environment of the -masdev-* serverBundle deployment
 deployments=$(oc get deployments -l mas.ibm.com/appType=serverBundle -oname | sed -e 's/^.*\///') # remove leading '***/')
-masdev_deploy=$(echo "$deployments" | grep -Pm 1 "\-masdev-[\w-]+$" || promptuser "$applicationid-all Deployment")
+masdev_deploy=$(echo "$deployments" | grep -Pm 1 "\-$applicationid[\w-]+$" || promptuser "$applicationid-all Deployment")
 deploy_env=$(oc set env deployment/$masdev_deploy --list)
 mas_logout_url=$(echo "$deploy_env" | grep -Piom 1 '(?<=MAS_LOGOUT_URL=)\S+' || promptuser "MAS_LOGOUT_URL")
 mxe_db_driver=$(echo "$deploy_env" | grep -Piom 1 '(?<=MXE_DB_DRIVER=)\S+' || promptuser "MXE_DB_DRIVER environment variable")
@@ -348,6 +410,8 @@ spec:
           # TODO: Get from imagestream itself
           image: >-
             image-registry.openshift-image-registry.svc:5000/${manage_namespace}/${emm_liberty}:v1
+          # When not using 'latest' tag, pullPolicy defaults to 'IfNotPresent', which won't auto-update
+          imagePullPolicy: Always
           ports:
             - containerPort: 9080
               protocol: TCP
@@ -407,6 +471,16 @@ spec:
                 secretKeyRef:
                   name: $applicationid-manage-encryptionsecret
                   key: MXE_SECURITY_CRYPTO_KEY
+            - name: CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: $oauth_secret
+                  key: username
+            - name: CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: $oauth_secret
+                  key: password
           volumeMounts:
             - name: manage-truststore
               readOnly: true
