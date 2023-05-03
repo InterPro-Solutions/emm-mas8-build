@@ -184,6 +184,7 @@ apply_output=$(apply_ear_config)
 # Build EAR only if config was changed (and not created)
 # This is needed because the ConfigChange trigger only builds on initial creation as of 2023-04-28
 if [[ -z "$(echo "$apply_output" | grep -Pm 1 'unchanged|created' || true)" ]]; then
+  ear_config_changed="1"
   oc start-build $ear_config --wait
 fi
 
@@ -228,58 +229,70 @@ source_secret=emm-mas8-build-ssh-key
 # 2.3.1 Gather config info (coreidp secrets etc)
 echo "Discovering secrets/configuration for EMM Liberty build..."
 coreidp_binding=$(echo "$secrets" | grep -Pm 1 "\-coreidp-system-binding" || promptuser "coreidp-system-binding Secret")
-## TODO: Register OIDC here
-#oauth_url=$(oc get secret $coreidp_binding --template='{{.data.url|base64decode}}')
-#oauth_username=$(oc get secret $coreidp_binding -o jsonpath="{.data['oauth-admin-username']}" | base64 -d)
-#oauth_password=$(oc get secret $coreidp_binding -o jsonpath="{.data['oauth-admin-password']}" | base64 -d)
-#domain_name=$(echo $oauth_url | grep -Pom 1 "(?<=https://auth.)[^/]*" || promptuser "domain name")
-#apps_domain_name=$(echo $domain_name | grep -Pom 1 "apps[^/]*" || promptuser "apps domain name")
-#app_url="https://$emm_liberty-$manage_namespace.$apps_domain_name"
-## Check for existing OAUTH secret for this app name
-#oauth_secret=$(echo "$secrets" | grep -Pm 1 "credentials-oauth-$emm_liberty" || true)
-## If not found, register OIDC and create secret
-#if [[ -z $oauth_secret ]]; then
-#  echo "Registering OIDC client..."
-#  oauth_basic="${oauth_username}:${oauth_password}"
-#  oidcres=$(
-#  #cat << EOF
-#  curl -kfX POST -u "$OAUTH_BASIC" -H 'Content-Type: application/json' "$OAUTH_URL/registration" -d@- << EOF
-#{
-#"client_name": "ezmaxmobile",
-#"client_id": "$emm_liberty",
-#"token_endpoint_auth_method": "client_secret_basic",
-#"scope": "openid profile email general",
-#"redirect_uris": ["$app_url/ezmaxmobile", "$app_url/oidcclient/redirect/oidc"],
-#"grant_types": ["authorization_code","client_credentials","implicit","refresh_token","urn:ietf:params:oauth:grant-type:jwt-bearer"],
-#"response_types": ["code","token","id_token token"],
-#"application_type": "web",
-#"subject_type":"public",
-#"post_logout_redirect_uris": ["$app_url/ezmaxmobile/logout"],
-#"preauthorized_scope": "openid profile email general",
-#"introspect_tokens": true,
-#"trusted_uri_prefixes": ["$app_url/"]
-#}
-#EOF
-#  )
-#  # Extract client secret from OIDC response
-#  client_secret=$(echo "$oidcres" | grep -Piom 1 '(?<="CLIENT_SECRET"\s*:\s*")[^,"]*')
-#  # Create secret
-#  oc create -f- << EOF
-#kind: Secret
-#apiVersion: v1
-#metadata:
-#  name: credentials-oauth-$emm_liberty
-#  namespace: $manage_namespace
-#data:
-#  password: $client_secret
-#  username: $emm_liberty
-#type: Opaque
-#EOF
-#  oauth_secret="credentials-oauth-$emm_liberty"
-#fi
-exit 0
-# 2.3.2 Create BuildConfig
+
+# 2.3.2 Register/Discover OIDC client
+oauth_url=$(oc get secret $coreidp_binding --template='{{.data.url|base64decode}}')
+oauth_username=$(oc get secret $coreidp_binding -o jsonpath="{.data['oauth-admin-username']}" | base64 -d)
+oauth_password=$(oc get secret $coreidp_binding -o jsonpath="{.data['oauth-admin-password']}" | base64 -d)
+domain_name=$(echo $oauth_url | grep -Pom 1 "(?<=https://auth.)[^/]*" || promptuser "domain name")
+apps_domain_name=$(echo $domain_name | grep -Pom 1 "apps[^/]*" || promptuser "apps domain name")
+app_url="https://$emm_liberty-$manage_namespace.$apps_domain_name"
+# Check for existing OAUTH secret for this app name
+oauth_secret=$(echo "$secrets" | grep -Pm 1 "credentials-oauth-$emm_liberty" || true)
+# If not found, register OIDC and create secret
+if [[ -z $oauth_secret ]]; then
+  echo "Registering OIDC client..."
+  oauth_basic="${oauth_username}:${oauth_password}"
+  # Modify client if it exists, otherwise create a new one
+  oidc_status=$(curl -kw '%{http_code}' -o /dev/null -u "$oauth_basic" "$oauth_url/registration/$emm_liberty")
+  if [[ "$oidc_status" == 200 ]]; then
+    method="PUT"
+    reg_url="$oauth_url/registration/$emm_liberty"
+  else
+    method="POST"
+    reg_url="$oauth_url/registration"
+  fi
+  oidcres=$(
+  #cat << EOF
+  curl -kfX $method -u "$oauth_basic" -H 'Content-Type: application/json' "$reg_url" -d@- << EOF
+{
+"client_name": "ezmaxmobile",
+"client_id": "$emm_liberty",
+"token_endpoint_auth_method": "client_secret_basic",
+"scope": "openid profile email general",
+"redirect_uris": ["$app_url/ezmaxmobile", "$app_url/oidcclient/redirect/oidc"],
+"grant_types": ["authorization_code","client_credentials","implicit","refresh_token","urn:ietf:params:oauth:grant-type:jwt-bearer"],
+"response_types": ["code","token","id_token token"],
+"application_type": "web",
+"subject_type":"public",
+"post_logout_redirect_uris": ["$app_url/ezmaxmobile/logout"],
+"preauthorized_scope": "openid profile email general",
+"introspect_tokens": true,
+"trusted_uri_prefixes": ["$app_url/"]
+}
+EOF
+  )
+  # Extract client secret from OIDC response
+  client_secret=$(echo "$oidcres" | grep -Piom 1 '"CLIENT_SECRET"\s*:\s*"[^,"]*' | sed -e 's/.*:\s*"//')
+  # Create secret
+#  cat << EOF > test.yaml
+  oc apply -f- << EOF
+kind: Secret
+apiVersion: v1
+metadata:
+  name: credentials-oauth-$emm_liberty
+  namespace: $manage_namespace
+data:
+  password: $(echo -n "$client_secret" | base64 -w 0)
+  username: $(echo -n "$emm_liberty" | base64 -w 0)
+type: Opaque
+EOF
+  oauth_secret="credentials-oauth-$emm_liberty"
+fi
+
+# 2.3.3 Create BuildConfig
 liberty_config=${emm_liberty}-build-config
+apply_output=$(
 #cat << EOF > test.yaml
 oc apply -f- << EOF
 apiVersion: build.openshift.io/v1
@@ -319,16 +332,6 @@ spec:
             secretKeyRef:
               name: $coreidp_binding
               key: url
-        - name: OAUTH_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: $coreidp_binding
-              key: oauth-admin-username
-        - name: OAUTH_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: $coreidp_binding
-              key: oauth-admin-password
         - name: APP_ID
           value: $emm_liberty
       forcePull: true
@@ -357,8 +360,13 @@ spec:
           name: "${emm_ear}:v1"
   runPolicy: Serial
 EOF
+)
 # 2.4 Build EMM Liberty
-#oc start-build $liberty_config --wait # TODO: DEBUG
+# We only need to rebuild if the liberty_config was changed AND the EAR config was not
+# If the EAR config was changed, the liberty config will automatically rebuild
+if [[ -z "$(echo "$apply_output" | grep -Pm 1 'unchanged|created' || true)" && -z "$ear_config_changed" ]]; then
+  oc start-build $liberty_config --wait
+fi
 
 # 3. Deploy Application
 # 3.1 Gather labels, secrets for deployment
@@ -377,6 +385,7 @@ mxe_db_driver=$(echo "$deploy_env" | grep -Piom 1 '(?<=MXE_DB_DRIVER=)\S+' || pr
 
 # 3.2 Create deployment config
 echo "Deploying EZMaxMobile..."
+# TODO: Sometimes rebuilding Liberty doesn't trigger a redeployment?
 #cat << EOF > test.yaml
 oc apply -f- << EOF
 apiVersion: apps/v1
@@ -471,6 +480,12 @@ spec:
                 secretKeyRef:
                   name: $applicationid-manage-encryptionsecret
                   key: MXE_SECURITY_CRYPTO_KEY
+            - name: APP_URL
+              value: $app_url
+            - name: DOMAIN_NAME
+              value: $domain_name
+            - name: CORE_NAMESPACE
+              value: $core_namespace
             - name: CLIENT_ID
               valueFrom:
                 secretKeyRef:
@@ -571,7 +586,7 @@ $(echo "$route_key" | sed 's/^/      /')
 $(echo "$route_dest_cert" | sed 's/^/      /')
   wildcardPolicy: None
 EOF
-oc rollout status deployment $emm_liberty --watch --timeout=20m
+oc rollout status deployment $emm_liberty --watch --timeout=30m
 echo "Successfully deployed EZMaxmobile. Deployment name: $emm_liberty"
 set +x
 set +e
