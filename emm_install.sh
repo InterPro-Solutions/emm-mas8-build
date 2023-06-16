@@ -142,9 +142,10 @@ spec:
         wget -O ezmaxmobile.zip -c "\$EMM_URL" &&\\
         unzip ezmaxmobile.zip &&\\
         cd ezmaxmobile &&\\
+        EAR_PATH=\$(find ../maximo/deployment -name "maximo-all.ear" | head -n1) &&\\
+        sed -i "s@maximo.ear\"\\s*value=\".*\"@maximo.ear\" value=\"\$EAR_PATH\"@g" buildemmear.xml &&\\
+        cat buildemmear.xml &&\\
         chmod u+x ./buildemmear.sh &&\\
-        # TODO: Replace maximo-all in buildemmear.xml
-        # sed 's/maximo.ear"\\s*value=".*"/maximo.ear" value="foo"/g' ezmaxmobile/buildemmear.xml &&\\
         ./buildemmear.sh &&\\
         ls -al default &&\\
         ls -al was-liberty-default &&\\
