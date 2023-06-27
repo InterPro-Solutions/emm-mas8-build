@@ -14,10 +14,10 @@ RUN rm /opt/ibm/wlp/usr/servers/defaultServer/server.env && mkdir /managefiles/a
 
 WORKDIR /config/
 
-RUN pwd && ls -la && id && ./buildenv.sh
+RUN pwd && ls -la && id && ls -la /config/dropins && ./buildenv.sh
 
 # Move EAR file
-RUN mv /config/dropins/ezmaxmobile.ear /config/apps/emm.ear
+RUN mv /config/dropins/ezmaxmobile.ear /config/apps/emm.ear || mv /config/dropins/emm.ear /config/apps/emm.ear
 
 COPY --chown=1001:0 additional-server-files/ /managefiles/additional-server-files/
 
