@@ -33,18 +33,22 @@ echo "Discovering secrets/configuration for OIDC extraction..."
 coreidp_binding=$(echo "$secrets" | grep -Pm 1 "\-coreidp-system-binding" || promptuser "coreidp-system-binding Secret")
 
 oauth_url=$(oc get secret $coreidp_binding --template='{{.data.url|base64decode}}')
+oauth_url="https://auth.dev2.apps.osp-epg4i.gm.com/oidc/endpoint/MaximoAppSuite"
+echo $oauth_url
 oauth_username=$(oc get secret $coreidp_binding -o jsonpath="{.data['oauth-admin-username']}" | base64 -d)
 oauth_password=$(oc get secret $coreidp_binding -o jsonpath="{.data['oauth-admin-password']}" | base64 -d)
 domain_name=$(echo $oauth_url | grep -Pom 1 "(?<=https://auth.)[^/]*" || promptuser "domain name")
 apps_domain_name=$(echo $domain_name | grep -Pom 1 "apps[^/]*" || promptuser "apps domain name")
 app_url="https://$CLIENT_ID-$manage_namespace.$apps_domain_name"
+echo "$app_url"
+exit 0
 echo "Fetching OIDC info..."
 oauth_basic="${oauth_username}:${oauth_password}"
-curl -kf -o discovery.json -u "$oauth_basic" "$oauth_url/.well-known/openid-configuration"
+# curl -kf -o discovery.json -u "$oauth_basic" "$oauth_url/.well-known/openid-configuration"
 echo "Fetched OIDC discovery info to: discovery.json"
-curl -kf -o "clients.json" -u "$oauth_basic" "$oauth_url/registration"
+# curl -kf -o "clients.json" -u "$oauth_basic" "$oauth_url/registration"
 # Try to use python to prettify JSON, but ignore errors if Python is missing
-cat clients.json | py -m json.tool > clients.tmp.json && mv clients.tmp.json clients.json || true
+# cat clients.json | py -m json.tool > clients.tmp.json && mv clients.tmp.json clients.json || true
 echo "Fetched OIDC client info to: clients.json"
 set +x
 set +e

@@ -13,6 +13,15 @@ promptuser() {
   echo "$REPLY"
 }
 
+# Try to source in environment variables from companion file, if it exists
+ENV_FILE=$(find . -maxdepth 1 -name 'emm*.env' | sort | head -n1)
+source "$ENV_FILE" > /dev/null 2>&1
+# If ASK_ENV set, ask user to provide an .env file
+if [[ -n "$ASK_ENV" ]]; then
+  read -p "Enter .env file name: " -r
+  if [[ -n "$REPLY" ]]; then source "$REPLY"; fi
+fi
+
 # 0. Check CLI exists, we are logged in, and have permissions
 oc_version=$(oc version)
 rtn_code=$?
@@ -25,8 +34,8 @@ set -e
 if [[ $(oc auth can-i '*' '*') != 'yes' ]]; then echo "Insufficient permissions to install. Please copy and paste Login command with permissions and try again." && exit 1; fi
 # Try and find core & manage projects
 namespaces=$(oc get namespaces -oname | sed -e 's/^.*\///')
-core_namespace=$(echo "$namespaces" | grep -Pm 1 "\-core$" || promptuser "Core namespace")
-manage_namespace=$(echo "$namespaces" | grep -Pm 1 "\-manage$" || promptuser "Manage namespace")
+[[ -z "$core_namespace" ]] && core_namespace=$(promptuser "Core namespace")
+[[ -z "$manage_namespace" ]] && manage_namespace=$(promptuser "Manage namespace")
 instance_id=$(echo $core_namespace | grep -Po -- "(?<=-).*(?=-)" || promptuser "Workspace/instance ID")
 echo "This script will install EZMaxMobile into your OpenShift Cluster."
 echo "Core namespace: $core_namespace"
@@ -43,7 +52,7 @@ if [[ -n "$emm_ear" ]]; then
   read -p "Use EMM EAR image name '$emm_ear'? [Y/n]: " -r
   # Prompt for name if no
   if [[ $REPLY =~ ^[Nn]$ ]]; then
-    read -p "Enter OPTIONAL name for EMM EAR [$DEFAULT_EMM_EAR]: " -r
+    read -p "Enter name for EMM EAR [$DEFAULT_EMM_EAR]: " -r
     DEFAULT_EMM_EAR="${REPLY:-$DEFAULT_EMM_EAR}"
     emm_ear=$(echo "$imagestreams" | grep -Pm 1 "$DEFAULT_EMM_EAR" || true)
   fi
@@ -67,11 +76,33 @@ configmaps=$(oc get configmaps -oname | sed -e 's/^.*\///') # remove leading '**
 truststorecfg=$(echo "$configmaps" | grep -Pm 1 "\-truststore-cfg" || promptuser "truststorecfg ConfigMap")
 # 1.2.3 Create BuildConfig
 ear_config=${emm_ear}-build-config
-deploy_package="ezmaxmobile.zip"
-deploy_token='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJidWNrZXQiOiJ0ZXN0LWVtbS1kZXBsb3ltZW50cyIsImtleVJlZyI6Ii4qZXptYXhtb2JpbGVbXi9dKiQifQ.-Npu7D9vSUxZkTEbmDrNgdBswmR8E3U6K-PN95yyJ9o'
+deploy_package="${deploy_package:=ezmaxmobile.zip}"
+[[ -z "$deploy_token" ]] && deploy_token='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJidWNrZXQiOiJ0ZXN0LWVtbS1kZXBsb3ltZW50cyIsImtleVJlZyI6Ii4qZXptYXhtb2JpbGVbXi9dKiQifQ.-Npu7D9vSUxZkTEbmDrNgdBswmR8E3U6K-PN95yyJ9o'
 echo "EMM deploy package: $deploy_package"
-# TODO: Prompt for deploy token
-# Backslash followed by newline is broken inside subshell heredocs, so use a function instead.
+# We need to modify the commands to pull the ezmaxmobile.zip file for the client
+# which may have an HTTP server to pull from instead.
+# If EMM_URL etc. specified, write them into the build config
+deploy_env_config() {
+  [[ -n "$EMM_URL" ]] && echo -e "- name: EMM_URL\n  value: $EMM_URL"
+  [[ -n "$DEPLOY_USER" ]] && echo -e "- name: DEPLOY_USER\n  value: $DEPLOY_USER"
+  [[ -n "$DEPLOY_PASSWORD" ]] && echo -e "- name: DEPLOY_PASSWORD\n  value: $DEPLOY_PASSWORD"
+}
+emm_url_config() {
+  if [[ -n "$EMM_URL" ]]; then
+    echo '"$EMM_URL"' # value already set by deploy_env_config
+  else
+    echo '$(wget -q -O - --header="Authorization: Bearer $DEPLOY_TOKEN" "$DEPLOY_GATEWAY_URL")'
+  fi
+}
+wget_config() {
+  # pass user & password to wget if set
+  if [[ -n "$DEPLOY_USER" ]]; then
+    echo 'wget -O ezmaxmobile.zip --user "$DEPLOY_USER" --password "$DEPLOY_PASSWORD" -c "$EMM_URL"'
+  else
+    echo 'wget -O ezmaxmobile.zip -c "$EMM_URL"'
+  fi
+}
+# Backslash followed by newline is broken inside subshell heredocs, so use functions instead.
 # See https://unix.stackexchange.com/a/534078
 apply_ear_config() {
 #cat << EOF > test.yaml
@@ -101,10 +132,10 @@ spec:
         - name: DEPLOY_GATEWAY_URL
           value: >-
             https://1qbx7rd5w9.execute-api.us-east-1.amazonaws.com/default/ezmax-deploy?key=${deploy_package}
-        # This token will be different for each client
         - name: DEPLOY_TOKEN
           value: >-
             $deploy_token
+$(echo "$(deploy_env_config)" | sed 's/^/        /')
       forcePull: true
   postCommit: {}
   source:
@@ -128,20 +159,25 @@ spec:
 
       WORKDIR /opt/IBM/SMP/maximo/tools/maximo
 
-      # TODO: Discover maximo-all or maximo-ui (or both)
+      # TODO: Detect maximo-all (or build from scratch?)
 
       COPY --chown=maximoinstall:0 deployment/
       /opt/IBM/SMP/maximo/deployment/was-liberty-default/deployment
 
       WORKDIR /opt/IBM/SMP
 
-      # Get download URL from deploy gateway, then download and build EMM ear
+      # Download and unzip ezmaxmobile.zip, from deploy gateway or HTTP server override
 
       RUN \\
-        EMM_URL=\$(wget -q -O - --header="Authorization: Bearer \$DEPLOY_TOKEN" "\$DEPLOY_GATEWAY_URL") &&\\
-        wget -O ezmaxmobile.zip -c "\$EMM_URL" &&\\
-        unzip ezmaxmobile.zip &&\\
+        EMM_URL=$(emm_url_config) &&\\
+        $(wget_config) &&\\
+        unzip ezmaxmobile.zip
+
+      # Build EMM ear and print some debugging info
+
+      RUN \\
         cd ezmaxmobile &&\\
+        find ../maximo/deployment -name "*.ear" &&\\
         EAR_PATH=\$(find ../maximo/deployment -name "maximo-all.ear" | head -n1) &&\\
         sed -i "s@maximo.ear\"\\s*value=\".*\"@maximo.ear\" value=\"\$EAR_PATH\"@g" buildemmear.xml &&\\
         cat buildemmear.xml &&\\
@@ -197,7 +233,7 @@ if [[ -n "$emm_liberty" ]]; then
   read -p "Use EMM Liberty image name '$emm_liberty'? [Y/n]: " -r
   # Prompt for name if no
   if [[ $REPLY =~ ^[Nn]$ ]]; then
-    read -p "Enter OPTIONAL name for EMM Liberty [$DEFAULT_LIBERTY_EAR]: " -r
+    read -p "Enter name for EMM Liberty [$DEFAULT_LIBERTY_EAR]: " -r
     DEFAULT_LIBERTY_EAR=${REPLY:-$DEFAULT_LIBERTY_EAR}
     emm_liberty=$(echo "$imagestreams" | grep -Pm 1 "$DEFAULT_LIBERTY_EAR" || true)
   fi
@@ -237,7 +273,8 @@ oauth_username=$(oc get secret $coreidp_binding -o jsonpath="{.data['oauth-admin
 oauth_password=$(oc get secret $coreidp_binding -o jsonpath="{.data['oauth-admin-password']}" | base64 -d)
 domain_name=$(echo $oauth_url | grep -Pom 1 "(?<=https://auth.)[^/]*" || promptuser "domain name")
 apps_domain_name=$(echo $domain_name | grep -Pom 1 "apps[^/]*" || promptuser "apps domain name")
-app_url="https://$emm_liberty-$manage_namespace.$apps_domain_name"
+app_host="${app_host:=$emm_liberty-$manage_namespace.$apps_domain_name}"
+app_url="https://$app_host"
 # Check for existing OAUTH secret for this app name
 oauth_secret=$(echo "$secrets" | grep -Pm 1 "credentials-oauth-$emm_liberty" || true)
 # If not found, register OIDC and create secret
@@ -293,6 +330,16 @@ fi
 
 # 2.3.3 Create BuildConfig
 liberty_config=${emm_liberty}-build-config
+# Use SSH or HTTPS repo URLs depending on GIT_HTTPS
+# Since some clients may not allow SSH traffic
+git_config() {
+  if [[ -n "$GIT_HTTPS" ]]; then
+    echo -e "  uri: 'https://github.com/InterPro-Solutions/emm-mas8-build.git'"
+  else
+    echo -e "  uri: 'git@github.com:InterPro-Solutions/emm-mas8-build.git'"
+    echo -e "sourceSecret:\n  name: $source_secret"
+  fi
+}
 apply_output=$(
 #cat << EOF > test.yaml
 oc apply -f- << EOF
@@ -340,9 +387,7 @@ spec:
   source:
     type: Git
     git:
-      uri: 'git@github.com:InterPro-Solutions/emm-mas8-build.git'
-    sourceSecret:
-      name: $source_secret
+$(echo "$(git_config)" | sed 's/^/    /')
     images:
       - from:
           kind: ImageStreamTag
@@ -383,10 +428,12 @@ masdev_deploy=$(echo "$deployments" | grep -Pm 1 "\-$applicationid[\w-]+$" || pr
 deploy_env=$(oc set env deployment/$masdev_deploy --list)
 mas_logout_url=$(echo "$deploy_env" | grep -Piom 1 '(?<=MAS_LOGOUT_URL=)\S+' || promptuser "MAS_LOGOUT_URL")
 mxe_db_driver=$(echo "$deploy_env" | grep -Piom 1 '(?<=MXE_DB_DRIVER=)\S+' || promptuser "MXE_DB_DRIVER environment variable")
+mxe_schemaowner=$(echo "$deploy_env" | grep -Piom 1 '(?<=MXE_DB_SCHEMAOWNER=)\S+' || promptuser "MXE_DB_SCHEMAOWNER environment variable")
 
 # 3.2 Create deployment config
 echo "Deploying EZMaxMobile..."
 # TODO: Sometimes rebuilding Liberty doesn't trigger a redeployment?
+# https://docs.openshift.com/container-platform/4.8/openshift_images/triggering-updates-on-imagestream-changes.html
 #cat << EOF > test.yaml
 oc apply -f- << EOF
 apiVersion: apps/v1
@@ -460,7 +507,7 @@ spec:
                   name: $app_binding
                   key: password
             - name: MXE_DB_SCHEMAOWNER
-              value: dbo
+              value: $mxe_schemaowner
             - name: MXE_DB_DRIVER
               value: $mxe_db_driver
             - name: MXE_MAS_WORKSPACEID
@@ -571,6 +618,7 @@ metadata:
     mas.ibm.com/appType: serverBundle
     mas.ibm.com/instanceId: $instance_id
 spec:
+  host: $app_host
   to:
     kind: Service
     name: $emm_liberty
@@ -587,7 +635,7 @@ $(echo "$route_key" | sed 's/^/      /')
 $(echo "$route_dest_cert" | sed 's/^/      /')
   wildcardPolicy: None
 EOF
-oc rollout status deployment $emm_liberty --watch --timeout=30m
+oc rollout status deployment $emm_liberty --watch --timeout=60m
 echo "Successfully deployed EZMaxmobile. Deployment name: $emm_liberty"
 set +x
 set +e
