@@ -74,7 +74,77 @@ secrets=$(oc get secrets -oname | sed -e 's/^.*\///') # remove leading '***/'
 truststorepasswd=$(echo "$secrets" | grep -Pm 1 "\-truststorepasswd" || promptuser "truststorepasswd Secret")
 configmaps=$(oc get configmaps -oname | sed -e 's/^.*\///') # remove leading '***/'
 truststorecfg=$(echo "$configmaps" | grep -Pm 1 "\-truststore-cfg" || promptuser "truststorecfg ConfigMap")
-# 1.2.3 Create BuildConfig
+
+# 1.2.2 Check if we need to build maximo-all.ear
+# This docker section is only used if an all-build doesn't exist
+all_ear_config() {
+cat << EOF
+WORKDIR /opt/IBM/SMP/maximo
+
+RUN mkdir -p /opt/IBM/SMP/maximo/additional-server-files
+
+COPY --chown=maximoinstall:0 tmp_build_files .
+
+RUN rm -rf customizationCredentials && rm trust.p12 && rm
+truststorePassword
+
+# Remove translation files that will not be used
+
+# TODO: Cleanup translation files
+
+RUN rm -f translation_files.zip lang/MaximoLangPkgXliff_Ar.zip
+lang/MaximoLangPkgXliff_Cs.zip lang/MaximoLangPkgXliff_Da.zip
+lang/MaximoLangPkgXliff_De.zip lang/MaximoLangPkgXliff_Es.zip
+lang/MaximoLangPkgXliff_Fi.zip lang/MaximoLangPkgXliff_Fr.zip
+lang/MaximoLangPkgXliff_He.zip lang/MaximoLangPkgXliff_Hr.zip
+lang/MaximoLangPkgXliff_Hu.zip lang/MaximoLangPkgXliff_It.zip
+lang/MaximoLangPkgXliff_Ja.zip lang/MaximoLangPkgXliff_Ko.zip
+lang/MaximoLangPkgXliff_Nl.zip lang/MaximoLangPkgXliff_No.zip
+lang/MaximoLangPkgXliff_Pl.zip lang/MaximoLangPkgXliff_Pt_BR.zip
+lang/MaximoLangPkgXliff_Ru.zip lang/MaximoLangPkgXliff_Sk.zip
+lang/MaximoLangPkgXliff_Sl.zip lang/MaximoLangPkgXliff_Sv.zip
+lang/MaximoLangPkgXliff_Tr.zip land/MaximoLangPkgXliff_Uk.zip
+lang/MaximoLangPkgXliff_Zh_CN.zip lang/MaximoLangPkgXliff_Zh_TW.zip
+
+RUN rm -rf tools/maximo/ar tools/maximo/cs tools/maximo/da tools/maximo/de
+tools/maximo/es tools/maximo/fi tools/maximo/fr tools/maximo/he
+tools/maximo/hr tools/maximo/hu tools/maximo/it tools/maximo/ja
+tools/maximo/ko tools/maximo/nl tools/maximo/no tools/maximo/pl
+tools/maximo/pt tools/maximo/ru tools/maximo/sk tools/maximo/sl
+tools/maximo/sv tools/maximo/tr tools/maximo/uk tools/maximo/zh
+tools/maximo/zht
+
+WORKDIR /opt/IBM/SMP/maximo/tools/maximo
+
+RUN \\
+  mkdir -p /opt/IBM/SMP/maximo/applications/maximo/businessobjects/classes/psdi/app/signature/apps &&\\
+  mkdir -p /opt/IBM/SMP/maximo/tools/maximo/log &&\\
+  ./pkginstall.sh && ./updatedblitepreprocessor.sh -disconnected &&\\
+  find /opt/IBM/SMP/maximo/applications -type d -exec chmod 777 {} + &&\\
+  chmod ugo+rw -R /opt/IBM/SMP/maximo/applications &&\\
+  find /opt/IBM/SMP/maximo/tools/maximo -type d -exec chmod 777 {} + &&\\
+  chmod ugo+rw -R /opt/IBM/SMP/maximo/tools/maximo &&\\
+  chmod 777 /opt/IBM/SMP/maximo/tools/maximo/log &&\\
+  find /opt/IBM/SMP/maximo/tools/maximo/en -type f -name postupdatedb.sh -exec chmod -v 777 {} +
+
+WORKDIR /opt/IBM/SMP/maximo/deployment/was-liberty-default
+
+RUN ./maximo-all.sh && ./buildmaximoui-war.sh && ./buildmaximo-xwar.sh
+EOF
+}
+ear_build_insert=''
+# Get manageadmin version from admin-build-config's Dockerfile
+# It's probably also possible to get this from the imagestream's `version` label
+manageadmin_from=$(oc get buildconfigs -l bundleType=admin -o custom-columns=:.spec.source.dockerfile | grep -Pm 1 'FROM\s+.*\s+AS.*' || echo 'FROM cp.icr.io/cp/manage/manageadmin:8.4.5 AS ADMIN')
+all_build_config=$(oc get buildconfigs -l bundleType=all -oname)
+# If all-build doesn't exist, we need to build it as part of the EAR build!
+# Also allow triggering this manually
+if [[ -z "$all_build_config" || -n "$BUILD_ALL_EAR" ]]; then
+  ear_build_insert=$(all_ear_config)
+  echo "No 'all' server bundle; will build maximo-all.ear from scratch"
+fi
+
+# 1.2.3 Write BuildConfig
 ear_config=${emm_ear}-build-config
 deploy_package="${deploy_package:=ezmaxmobile.zip}"
 [[ -z "$deploy_token" ]] && deploy_token='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJidWNrZXQiOiJ0ZXN0LWVtbS1kZXBsb3ltZW50cyIsImtleVJlZyI6Ii4qZXptYXhtb2JpbGVbXi9dKiQifQ.-Npu7D9vSUxZkTEbmDrNgdBswmR8E3U6K-PN95yyJ9o'
@@ -141,8 +211,9 @@ $(echo "$(deploy_env_config)" | sed 's/^/        /')
   source:
     type: Dockerfile
     dockerfile: >
-      FROM cp.icr.io/cp/manage/manageadmin:8.4.5 AS ADMIN
+      ${manageadmin_from}
 
+$(echo "$ear_build_insert" | sed 's/^/      /')
 
       ENV MXE_MASDEPLOYED=1
 
@@ -154,15 +225,13 @@ $(echo "$(deploy_env_config)" | sed 's/^/        /')
 
       ENV LANGUAGE_ADD=
 
-      COPY --chown=maximoinstall:0 additional-server-files/
-      /opt/IBM/SMP/maximo/additional-server-files
+      # If maximo-all.ear was not built from scratch, copy-in admin-build's artifacts
+
+      $([[ -z "$ear_build_insert" ]] && echo 'COPY --chown=maximoinstall:0 additional-server-files/ /opt/IBM/SMP/maximo/additional-server-files')
 
       WORKDIR /opt/IBM/SMP/maximo/tools/maximo
 
-      # TODO: Detect maximo-all (or build from scratch?)
-
-      COPY --chown=maximoinstall:0 deployment/
-      /opt/IBM/SMP/maximo/deployment/was-liberty-default/deployment
+      $([[ -z "$ear_build_insert" ]] && echo 'COPY --chown=maximoinstall:0 deployment/ /opt/IBM/SMP/maximo/deployment/was-liberty-default/deployment')
 
       WORKDIR /opt/IBM/SMP
 
