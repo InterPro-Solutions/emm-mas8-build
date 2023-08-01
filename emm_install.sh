@@ -13,7 +13,7 @@ promptuser() {
   echo "$REPLY"
 }
 
-# Try to source in environment variables from companion file, if it exists
+# 0. Try to source in environment variables from companion file(s)
 ENV_FILE=$(find . -maxdepth 1 -name 'emm*.env' | sort | head -n1)
 source "$ENV_FILE" > /dev/null 2>&1
 # If ASK_ENV set, ask user to provide an .env file
@@ -22,7 +22,7 @@ if [[ -n "$ASK_ENV" ]]; then
   if [[ -n "$REPLY" ]]; then source "$REPLY"; fi
 fi
 
-# 0. Check CLI exists, we are logged in, and have permissions
+# 0.1 Check CLI exists, we are logged in, and have permissions
 oc_version=$(oc version)
 rtn_code=$?
 if [[ -z "$oc_version" || rtn_code -eq 127 ]]; then
@@ -79,53 +79,7 @@ truststorecfg=$(echo "$configmaps" | grep -Pm 1 "\-truststore-cfg" || promptuser
 # This docker section is only used if an all-build doesn't exist
 all_ear_config() {
 cat << EOF
-WORKDIR /opt/IBM/SMP/maximo
-
-RUN mkdir -p /opt/IBM/SMP/maximo/additional-server-files
-
-COPY --chown=maximoinstall:0 tmp_build_files .
-
-RUN rm -rf customizationCredentials && rm trust.p12 && rm
-truststorePassword
-
-# Remove translation files that will not be used
-
-# TODO: Cleanup translation files
-
-RUN rm -f translation_files.zip lang/MaximoLangPkgXliff_Ar.zip
-lang/MaximoLangPkgXliff_Cs.zip lang/MaximoLangPkgXliff_Da.zip
-lang/MaximoLangPkgXliff_De.zip lang/MaximoLangPkgXliff_Es.zip
-lang/MaximoLangPkgXliff_Fi.zip lang/MaximoLangPkgXliff_Fr.zip
-lang/MaximoLangPkgXliff_He.zip lang/MaximoLangPkgXliff_Hr.zip
-lang/MaximoLangPkgXliff_Hu.zip lang/MaximoLangPkgXliff_It.zip
-lang/MaximoLangPkgXliff_Ja.zip lang/MaximoLangPkgXliff_Ko.zip
-lang/MaximoLangPkgXliff_Nl.zip lang/MaximoLangPkgXliff_No.zip
-lang/MaximoLangPkgXliff_Pl.zip lang/MaximoLangPkgXliff_Pt_BR.zip
-lang/MaximoLangPkgXliff_Ru.zip lang/MaximoLangPkgXliff_Sk.zip
-lang/MaximoLangPkgXliff_Sl.zip lang/MaximoLangPkgXliff_Sv.zip
-lang/MaximoLangPkgXliff_Tr.zip land/MaximoLangPkgXliff_Uk.zip
-lang/MaximoLangPkgXliff_Zh_CN.zip lang/MaximoLangPkgXliff_Zh_TW.zip
-
-RUN rm -rf tools/maximo/ar tools/maximo/cs tools/maximo/da tools/maximo/de
-tools/maximo/es tools/maximo/fi tools/maximo/fr tools/maximo/he
-tools/maximo/hr tools/maximo/hu tools/maximo/it tools/maximo/ja
-tools/maximo/ko tools/maximo/nl tools/maximo/no tools/maximo/pl
-tools/maximo/pt tools/maximo/ru tools/maximo/sk tools/maximo/sl
-tools/maximo/sv tools/maximo/tr tools/maximo/uk tools/maximo/zh
-tools/maximo/zht
-
-WORKDIR /opt/IBM/SMP/maximo/tools/maximo
-
-RUN \\
-  mkdir -p /opt/IBM/SMP/maximo/applications/maximo/businessobjects/classes/psdi/app/signature/apps &&\\
-  mkdir -p /opt/IBM/SMP/maximo/tools/maximo/log &&\\
-  ./pkginstall.sh && ./updatedblitepreprocessor.sh -disconnected &&\\
-  find /opt/IBM/SMP/maximo/applications -type d -exec chmod 777 {} + &&\\
-  chmod ugo+rw -R /opt/IBM/SMP/maximo/applications &&\\
-  find /opt/IBM/SMP/maximo/tools/maximo -type d -exec chmod 777 {} + &&\\
-  chmod ugo+rw -R /opt/IBM/SMP/maximo/tools/maximo &&\\
-  chmod 777 /opt/IBM/SMP/maximo/tools/maximo/log &&\\
-  find /opt/IBM/SMP/maximo/tools/maximo/en -type f -name postupdatedb.sh -exec chmod -v 777 {} +
+# Build maximo-all.ear
 
 WORKDIR /opt/IBM/SMP/maximo/deployment/was-liberty-default
 
@@ -135,10 +89,10 @@ EOF
 ear_build_insert=''
 # Get manageadmin version from admin-build-config's Dockerfile
 # It's probably also possible to get this from the imagestream's `version` label
-manageadmin_from=$(oc get buildconfigs -l bundleType=admin -o custom-columns=:.spec.source.dockerfile | grep -Pm 1 'FROM\s+.*\s+AS.*' || echo 'FROM cp.icr.io/cp/manage/manageadmin:8.4.5 AS ADMIN')
+manageadmin_from=$(oc get buildconfigs -l bundleType=admin -o custom-columns=:.spec.source.dockerfile | grep -Pm 1 'FROM\s+.*\s+AS\s+ADMIN' || echo 'FROM cp.icr.io/cp/manage/manageadmin:8.4.5 AS ADMIN')
 all_build_config=$(oc get buildconfigs -l bundleType=all -oname)
 # If all-build doesn't exist, we need to build it as part of the EAR build!
-# Also allow triggering this manually
+# `BUILD_ALL_EAR` also triggers this
 if [[ -z "$all_build_config" || -n "$BUILD_ALL_EAR" ]]; then
   ear_build_insert=$(all_ear_config)
   echo "No 'all' server bundle; will build maximo-all.ear from scratch"
@@ -154,8 +108,24 @@ echo "EMM deploy package: $deploy_package"
 # If EMM_URL etc. specified, write them into the build config
 deploy_env_config() {
   [[ -n "$EMM_URL" ]] && echo -e "- name: EMM_URL\n  value: $EMM_URL"
-  [[ -n "$DEPLOY_USER" ]] && echo -e "- name: DEPLOY_USER\n  value: $DEPLOY_USER"
-  [[ -n "$DEPLOY_PASSWORD" ]] && echo -e "- name: DEPLOY_PASSWORD\n  value: $DEPLOY_PASSWORD"
+  # get username & password from secret
+  if [[ -n "$DEPLOY_SECRET" ]]; then
+    cat << EOF
+- name: DEPLOY_USER
+  valueFrom:
+    secretKeyRef:
+      name: "$DEPLOY_SECRET"
+      key: username
+- name: DEPLOY_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: "$DEPLOY_SECRET"
+      key: password
+EOF
+  else
+    [[ -n "$DEPLOY_USER" ]] && echo -e "- name: DEPLOY_USER\n  value: $DEPLOY_USER"
+    [[ -n "$DEPLOY_PASSWORD" ]] && echo -e "- name: DEPLOY_PASSWORD\n  value: $DEPLOY_PASSWORD"
+  fi
 }
 emm_url_config() {
   if [[ -n "$EMM_URL" ]]; then
@@ -166,7 +136,7 @@ emm_url_config() {
 }
 wget_config() {
   # pass user & password to wget if set
-  if [[ -n "$DEPLOY_USER" ]]; then
+  if [[ -n "$DEPLOY_USER" || -n "$DEPLOY_SECRET" ]]; then
     echo 'wget -O ezmaxmobile.zip --user "$DEPLOY_USER" --password "$DEPLOY_PASSWORD" -c "$EMM_URL"'
   else
     echo 'wget -O ezmaxmobile.zip -c "$EMM_URL"'
@@ -175,7 +145,7 @@ wget_config() {
 # Backslash followed by newline is broken inside subshell heredocs, so use functions instead.
 # See https://unix.stackexchange.com/a/534078
 apply_ear_config() {
-#cat << EOF > test.yaml
+# cat << EOF > emm-ear-build-config.yaml
 oc apply -f- << EOF
 kind: BuildConfig
 apiVersion: build.openshift.io/v1
@@ -213,8 +183,6 @@ $(echo "$(deploy_env_config)" | sed 's/^/        /')
     dockerfile: >
       ${manageadmin_from}
 
-$(echo "$ear_build_insert" | sed 's/^/      /')
-
       ENV MXE_MASDEPLOYED=1
 
       ENV MXE_USESQLSERVERSEQUENCE=1
@@ -225,13 +193,13 @@ $(echo "$ear_build_insert" | sed 's/^/      /')
 
       ENV LANGUAGE_ADD=
 
-      # If maximo-all.ear was not built from scratch, copy-in admin-build's artifacts
-
-      $([[ -z "$ear_build_insert" ]] && echo 'COPY --chown=maximoinstall:0 additional-server-files/ /opt/IBM/SMP/maximo/additional-server-files')
+      COPY --chown=maximoinstall:0 additional-server-files/ /opt/IBM/SMP/maximo/additional-server-files
 
       WORKDIR /opt/IBM/SMP/maximo/tools/maximo
 
-      $([[ -z "$ear_build_insert" ]] && echo 'COPY --chown=maximoinstall:0 deployment/ /opt/IBM/SMP/maximo/deployment/was-liberty-default/deployment')
+      COPY --chown=maximoinstall:0 deployment/ /opt/IBM/SMP/maximo/deployment/was-liberty-default/deployment
+
+$(echo "$ear_build_insert" | sed 's/^/      /')
 
       WORKDIR /opt/IBM/SMP
 
@@ -315,7 +283,7 @@ fi
 echo "EMM Liberty image: $emm_liberty"
 
 # 2.2 Create GitHub Source Secret
-#cat << EOF > test.yaml
+#cat << EOF > gh-source-secret.yaml
 oc apply -f- << EOF
 kind: Secret
 apiVersion: v1
@@ -382,7 +350,7 @@ EOF
   # Extract client secret from OIDC response
   client_secret=$(echo "$oidcres" | grep -Piom 1 '"CLIENT_SECRET"\s*:\s*"[^,"]*' | sed -e 's/.*:\s*"//')
   # Create secret
-#  cat << EOF > test.yaml
+#  cat << EOF > oidc-secret.yaml
   oc apply -f- << EOF
 kind: Secret
 apiVersion: v1
@@ -410,7 +378,7 @@ git_config() {
   fi
 }
 apply_output=$(
-#cat << EOF > test.yaml
+#cat << EOF > emm-liberty-build-config.yaml
 oc apply -f- << EOF
 apiVersion: build.openshift.io/v1
 kind: BuildConfig
@@ -503,7 +471,7 @@ mxe_schemaowner=$(echo "$deploy_env" | grep -Piom 1 '(?<=MXE_DB_SCHEMAOWNER=)\S+
 echo "Deploying EZMaxMobile..."
 # TODO: Sometimes rebuilding Liberty doesn't trigger a redeployment?
 # https://docs.openshift.com/container-platform/4.8/openshift_images/triggering-updates-on-imagestream-changes.html
-#cat << EOF > test.yaml
+#cat << EOF > emm-liberty-deployment.yaml
 oc apply -f- << EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -639,7 +607,7 @@ spec:
 EOF
 
 # 3.3 Create service
-#cat << EOF > test.yaml
+#cat << EOF > emm-liberty-service.yaml
 oc apply -f- << EOF
 kind: Service
 apiVersion: v1
@@ -675,7 +643,7 @@ route_dest_cert=$(oc get route "$masdev_route" -o custom-columns=:.spec.tls.dest
 if [[ "$route_dest_cert" == "<none>" ]]; then echo "Error: Could not find route destination certificate" && exit 1; fi
 
 # 3.5 Create Route
-#cat << EOF > test.yaml
+#cat << EOF > emm-liberty-route.yaml
 oc apply -f- << EOF
 kind: Route
 apiVersion: route.openshift.io/v1
