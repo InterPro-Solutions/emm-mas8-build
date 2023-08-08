@@ -87,9 +87,9 @@ RUN ./maximo-all.sh && ./buildmaximoui-war.sh && ./buildmaximo-xwar.sh
 EOF
 }
 ear_build_insert=''
-# Get manageadmin version from admin-build-config's Dockerfile
-# It's probably also possible to get this from the imagestream's `version` label
-manageadmin_from=$(oc get buildconfigs -l bundleType=admin -o custom-columns=:.spec.source.dockerfile | grep -Pm 1 'FROM\s+.*\s+AS\s+ADMIN' || echo 'FROM cp.icr.io/cp/manage/manageadmin:8.4.5 AS ADMIN')
+# Get manageadmin version from admin-build-config
+manage_version=$(oc get imagestreams -l bundleType=admin -o jsonpath='{.items[0]..labels.version}')
+[[ -z "$manage_version" ]] && manage_version='8.4.5'
 all_build_config=$(oc get buildconfigs -l bundleType=all -oname)
 # If all-build doesn't exist, we need to build it as part of the EAR build!
 # `BUILD_ALL_EAR` also triggers this
@@ -181,7 +181,7 @@ $(echo "$(deploy_env_config)" | sed 's/^/        /')
   source:
     type: Dockerfile
     dockerfile: >
-      ${manageadmin_from}
+      FROM cp.icr.io/cp/manage/manageadmin:${manage_version} AS ADMIN
 
       ENV MXE_MASDEPLOYED=1
 
@@ -478,6 +478,20 @@ kind: Deployment
 metadata:
   name: $emm_liberty
   namespace: $manage_namespace
+  # Redeploy whenever the Liberty build completes
+  annotations:
+    image.openshift.io/triggers: >-
+      [
+        {
+          "from": {
+            "kind": "ImageStreamTag",
+            "name": "${emm_liberty}:v1",
+            "namespace": "$manage_namespace"
+          },
+          "fieldPath": "spec.template.spec.containers[?(@.name==\\"${emm_liberty}\\")].image",
+          "paused": false
+        }
+      ]
 spec:
   selector:
     matchLabels:
