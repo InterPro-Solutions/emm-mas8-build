@@ -2,3 +2,4 @@
 *.ear
 .idea
 *.env
+.vscode

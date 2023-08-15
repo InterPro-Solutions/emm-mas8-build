@@ -144,13 +144,14 @@ wget_config() {
 }
 # Backslash followed by newline is broken inside subshell heredocs, so use functions instead.
 # See https://unix.stackexchange.com/a/534078
+# Takes three arguments: build-config name, image tag to pull, and whether to skip config change trigger
 apply_ear_config() {
-# cat << EOF > emm-ear-build-config.yaml
+# cat << EOF > $1.yaml
 oc apply -f- << EOF
 kind: BuildConfig
 apiVersion: build.openshift.io/v1
 metadata:
-  name: $ear_config
+  name: "$1"
   namespace: $manage_namespace
 spec:
   nodeSelector: null
@@ -233,7 +234,7 @@ $(echo "$ear_build_insert" | sed 's/^/      /')
     images:
       - from:
           kind: ImageStreamTag
-          name: "${masdev_image}:latest"
+          name: "$2"
         paths:
           - sourcePath: >-
               /opt/IBM/SMP/maximo/deployment/was-liberty-default/deployment
@@ -249,15 +250,23 @@ $(echo "$ear_build_insert" | sed 's/^/      /')
           name: $truststorecfg
         destinationDir: tmp_build_files
   runPolicy: Serial
+$([[ -z "$3" ]] && cat << EOM
   triggers:
     - type: ConfigChange
+EOM
+)
 EOF
 }
-apply_output=$(apply_ear_config)
+apply_output=$(apply_ear_config "$ear_config" "${masdev_image}:latest")
+# Also create a -rebuild-config just for rebuilding EMM
+if [[ -n "$BUILD_ALL_EAR" ]]; then
+  ear_build_insert='' # don't include maximo-all build insert this time
+  rebuild_apply_output=$(apply_ear_config "${emm_ear}-rebuild-config" "${emm_ear}:v1" "1")
+fi
 # 1.3 (Optional) Build EMM EAR
 # Build EAR only if config was changed (and not created)
 # This is needed because the ConfigChange trigger only builds on initial creation as of 2023-04-28
-if [[ -z "$(echo "$apply_output" | grep -Pm 1 'unchanged|created' || true)" ]]; then
+if [[ -z "$(echo "$apply_output" | grep -Pm 1 'unchanged|created')" ]]; then
   ear_config_changed="1"
   oc start-build $ear_config --wait
 fi
@@ -466,10 +475,19 @@ deploy_env=$(oc set env deployment/$masdev_deploy --list)
 mas_logout_url=$(echo "$deploy_env" | grep -Piom 1 '(?<=MAS_LOGOUT_URL=)\S+' || promptuser "MAS_LOGOUT_URL")
 mxe_db_driver=$(echo "$deploy_env" | grep -Piom 1 '(?<=MXE_DB_DRIVER=)\S+' || promptuser "MXE_DB_DRIVER environment variable")
 mxe_schemaowner=$(echo "$deploy_env" | grep -Piom 1 '(?<=MXE_DB_SCHEMAOWNER=)\S+' || promptuser "MXE_DB_SCHEMAOWNER environment variable")
+encryption_secret=$(oc get deployments -o jsonpath='{..env[?(@.name == "MXE_SECURITY_CRYPTO_KEY")]..secretKeyRef.name}' | grep -Po '^\S+')
+
+# 3.1.1 (Optionally) Fetch offline PVC info
+# '_' has special meaning; PVC is looked up from manage deployment
+if [[ "$OFFLINE_PVC" == "_" ]]; then
+  OFFLINE_PVC=$(oc get deployment ${masdev_deploy} -o jsonpath='{..volumes[?(@.persistentVolumeClaim)]..claimName}' | grep -Po '^\S+' || promptuser "Offline data PVC name")
+fi
+if [[ -n "$OFFLINE_PVC" ]]; then
+  echo "Using offline PVC: $OFFLINE_PVC"
+fi
 
 # 3.2 Create deployment config
 echo "Deploying EZMaxMobile..."
-# TODO: Sometimes rebuilding Liberty doesn't trigger a redeployment?
 # https://docs.openshift.com/container-platform/4.8/openshift_images/triggering-updates-on-imagestream-changes.html
 #cat << EOF > emm-liberty-deployment.yaml
 oc apply -f- << EOF
@@ -569,16 +587,19 @@ spec:
               value: nohash
             - name: TZ
               value: GMT
+$([[ -n "$encryption_secret" ]] && cat << EOM
             - name: MXE_SECURITY_CRYPTOX_KEY
               valueFrom:
                 secretKeyRef:
-                  name: $applicationid-manage-encryptionsecret
+                  name: $encryption_secret
                   key: MXE_SECURITY_CRYPTOX_KEY
             - name: MXE_SECURITY_CRYPTO_KEY
               valueFrom:
                 secretKeyRef:
-                  name: $applicationid-manage-encryptionsecret
+                  name: $encryption_secret
                   key: MXE_SECURITY_CRYPTO_KEY
+EOM
+)
             - name: APP_URL
               value: $app_url
             - name: DOMAIN_NAME
@@ -605,6 +626,11 @@ spec:
             - name: internal-manage-tls
               readOnly: true
               mountPath: /etc/ssl/certs/internal-manage-tls
+$([[ -n "$OFFLINE_PVC" ]] && cat << EOM
+            - name: $OFFLINE_PVC
+              mountPath: /data
+EOM
+)
       volumes:
         - name: manage-truststore
           configMap:
@@ -618,6 +644,12 @@ spec:
           secret:
             secretName: $internal_manage_tls
             defaultMode: 420
+$([[ -n "$OFFLINE_PVC" ]] && cat << EOM
+        - name: $OFFLINE_PVC
+          persistentVolumeClaim:
+            claimName: $OFFLINE_PVC
+EOM
+)
 EOF
 
 # 3.3 Create service
@@ -648,13 +680,13 @@ EOF
 # 3.4 Get Route cert info
 # Fetch Cert info from Manage's Route
 routes=$(oc get route -l mas.ibm.com/applicationId=manage -oname | sed -e 's/^.*\///') # remove leading '***/')
-masdev_route=$(echo "$routes" | grep -Pm 1 "\-manage-$applicationid" || promptuser "manage-$applicationid Route")
-route_cert=$(oc get route "$masdev_route" -o custom-columns=:.spec.tls.certificate --no-headers=true)
-if [[ "$route_cert" == "<none>" ]]; then echo "Error: Could not find route certificate" && exit 1; fi
-route_key=$(oc get route "$masdev_route" -o custom-columns=:.spec.tls.key --no-headers=true)
-if [[ "$route_key" == "<none>" ]]; then echo "Error: Could not find route key" && exit 1; fi
-route_dest_cert=$(oc get route "$masdev_route" -o custom-columns=:.spec.tls.destinationCACertificate --no-headers=true)
-if [[ "$route_dest_cert" == "<none>" ]]; then echo "Error: Could not find route destination certificate" && exit 1; fi
+masdev_route=$(echo "$routes" | \grep -Pm 1 "\-manage-$applicationid" || promptuser "manage-$applicationid Route")
+route_cert=$(oc get route "$masdev_route" -o jsonpath='{..spec.tls.certificate}')
+if [[ -z "$route_cert" ]]; then echo "Error: Could not find route certificate" && exit 1; fi
+route_key=$(oc get route "$masdev_route" -o jsonpath='{..spec.tls.key}')
+if [[ -z "$route_key" ]]; then echo "Error: Could not find route key" && exit 1; fi
+route_dest_cert=$(oc get route "$masdev_route" -o jsonpath='{..spec.tls.destinationCACertificate}')
+if [[ -z "$route_dest_cert" ]]; then echo "Error: Could not find route destination certificate" && exit 1; fi
 
 # 3.5 Create Route
 #cat << EOF > emm-liberty-route.yaml
@@ -686,6 +718,7 @@ $(echo "$route_key" | sed 's/^/      /')
 $(echo "$route_dest_cert" | sed 's/^/      /')
   wildcardPolicy: None
 EOF
+
 oc rollout status deployment $emm_liberty --watch --timeout=60m
 echo "Successfully deployed EZMaxmobile. Deployment name: $emm_liberty"
 set +x
