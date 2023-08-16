@@ -24,10 +24,10 @@ The initial rollout may take 20-30 minutes to complete.
 
 You may be prompted for the names to use for the deployment and EAR build objects, as well as missing Secrets/ConfigMaps.
 
-There may also be an included `emm*.env` file, which contains configuration for a specific environment
-
 For the latter, i.e if the script asks you for `Missing coreidp-binding Secret`, you may have to navigate to `Workloads -> Secrets`,
 and search through the `-manage` namespace for an object with a similar name to `coreidp-binding`.
+
+There is probably also an included `emm*.env` file, which contains configuration for a specific environment.
 
 4. In the OpenShift web console, navigate to `Networking -> Routes`, and click the Location of the route matching the new deployment.
 5. Add `/ezmaxmobile` to your browser's path, and confirm that you are redirected through the MAS 8 authentication flow to EZMaxMobile.
@@ -40,5 +40,7 @@ To rebuild and redeploy EMM, follow these steps:
 4. After the EAR build finishes, monitor the progress of the `emm-liberty-build` (it will start automatically) from `Builds -> Builds`.
 5. Once the `emm-liberty-build` has completed, navigate to `Workloads -> Deployments`.
 6. Click the `emm-liberty` deployment or similar.
-7. In the `Pods` tab, verify that a new pod(s) has started; if not, you can `Delete Pod` the old pod from the right menu to spin up a new one.
+7. Confirm that the deployment has started new pods.
 8. Proceed to step `4` of the `Installation` to verify your changes. Note that the application may take about 5 minutes to start up.
+
+If your environment does not include an `-all` server bundle, there will be an additional BuildConfig, `emm-ear-rebuild-config` or similar. This BuildConfig can be run instead in step 3 in the event that only EMM has to rebuilt and Manage has not changed.

@@ -83,7 +83,7 @@ cat << EOF
 
 WORKDIR /opt/IBM/SMP/maximo/deployment/was-liberty-default
 
-RUN ./maximo-all.sh && ./buildmaximoui-war.sh && ./buildmaximo-xwar.sh
+RUN ./maximo-all.sh
 EOF
 }
 ear_build_insert=''
@@ -184,6 +184,8 @@ $(echo "$(deploy_env_config)" | sed 's/^/        /')
     dockerfile: >
       FROM cp.icr.io/cp/manage/manageadmin:${manage_version} AS ADMIN
 
+$(echo "$ear_build_insert" | sed 's/^/      /')
+
       ENV MXE_MASDEPLOYED=1
 
       ENV MXE_USESQLSERVERSEQUENCE=1
@@ -199,8 +201,6 @@ $(echo "$(deploy_env_config)" | sed 's/^/        /')
       WORKDIR /opt/IBM/SMP/maximo/tools/maximo
 
       COPY --chown=maximoinstall:0 deployment/ /opt/IBM/SMP/maximo/deployment/was-liberty-default/deployment
-
-$(echo "$ear_build_insert" | sed 's/^/      /')
 
       WORKDIR /opt/IBM/SMP
 
@@ -260,7 +260,7 @@ EOF
 apply_output=$(apply_ear_config "$ear_config" "${masdev_image}:latest")
 # Also create a -rebuild-config just for rebuilding EMM
 if [[ -n "$BUILD_ALL_EAR" ]]; then
-  ear_build_insert='' # don't include maximo-all build insert this time
+  ear_build_insert='' # don't include maximo-all build insert for rebuild
   rebuild_apply_output=$(apply_ear_config "${emm_ear}-rebuild-config" "${emm_ear}:v1" "1")
 fi
 # 1.3 (Optional) Build EMM EAR
