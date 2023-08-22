@@ -76,17 +76,24 @@ configmaps=$(oc get configmaps -oname | sed -e 's/^.*\///') # remove leading '**
 truststorecfg=$(echo "$configmaps" | grep -Pm 1 "\-truststore-cfg" || promptuser "truststorecfg ConfigMap")
 
 # 1.2.2 Check if we need to build maximo-all.ear
-# This docker section is only used if an all-build doesn't exist
-all_ear_config() {
+# This docker section is prepended by default;
+# If an all-build doesn't exist, the admin-build's dockerfile is used.
+default_ear_prelude() {
 cat << EOF
-# Build maximo-all.ear
+FROM cp.icr.io/cp/manage/manageadmin:${manage_version} AS ADMIN
 
-WORKDIR /opt/IBM/SMP/maximo/deployment/was-liberty-default
+ENV MXE_MASDEPLOYED=1
 
-RUN ./maximo-all.sh
+ENV MXE_USESQLSERVERSEQUENCE=1
+
+ENV LC_ALL=en_US.UTF-8
+
+ENV LANGUAGE_BASE=en
+
+ENV LANGUAGE_ADD=
 EOF
 }
-ear_build_insert=''
+
 # Get manageadmin version from admin-build-config
 manage_version=$(oc get imagestreams -l bundleType=admin -o jsonpath='{.items[0]..labels.version}')
 [[ -z "$manage_version" ]] && manage_version='8.4.5'
@@ -94,8 +101,10 @@ all_build_config=$(oc get buildconfigs -l bundleType=all -oname)
 # If all-build doesn't exist, we need to build it as part of the EAR build!
 # `BUILD_ALL_EAR` also triggers this
 if [[ -z "$all_build_config" || -n "$BUILD_ALL_EAR" ]]; then
-  ear_build_insert=$(all_ear_config)
+  ear_build_insert=$(oc get buildconfigs -l bundleType=admin -o jsonpath='{.items[0]..dockerfile}' | sed -Ee 's/\s*RUN.*buildmaximo\S+\.sh.*$/RUN .\/maximo-all.sh/' | sed -e 'G')
   echo "No 'all' server bundle; will build maximo-all.ear from scratch"
+else
+  ear_build_insert=$(default_ear_prelude)
 fi
 
 # 1.2.3 Write BuildConfig
@@ -182,19 +191,7 @@ $(echo "$(deploy_env_config)" | sed 's/^/        /')
   source:
     type: Dockerfile
     dockerfile: >
-      FROM cp.icr.io/cp/manage/manageadmin:${manage_version} AS ADMIN
-
 $(echo "$ear_build_insert" | sed 's/^/      /')
-
-      ENV MXE_MASDEPLOYED=1
-
-      ENV MXE_USESQLSERVERSEQUENCE=1
-
-      ENV LC_ALL=en_US.UTF-8
-
-      ENV LANGUAGE_BASE=en
-
-      ENV LANGUAGE_ADD=
 
       COPY --chown=maximoinstall:0 additional-server-files/ /opt/IBM/SMP/maximo/additional-server-files
 
@@ -260,7 +257,7 @@ EOF
 apply_output=$(apply_ear_config "$ear_config" "${masdev_image}:latest")
 # Also create a -rebuild-config just for rebuilding EMM
 if [[ -n "$BUILD_ALL_EAR" ]]; then
-  ear_build_insert='' # don't include maximo-all build insert for rebuild
+  ear_build_insert=$(default_ear_prelude) # don't include maximo-all build insert for rebuild
   rebuild_apply_output=$(apply_ear_config "${emm_ear}-rebuild-config" "${emm_ear}:v1" "1")
 fi
 # 1.3 (Optional) Build EMM EAR
@@ -475,7 +472,7 @@ deploy_env=$(oc set env deployment/$masdev_deploy --list)
 mas_logout_url=$(echo "$deploy_env" | grep -Piom 1 '(?<=MAS_LOGOUT_URL=)\S+' || promptuser "MAS_LOGOUT_URL")
 mxe_db_driver=$(echo "$deploy_env" | grep -Piom 1 '(?<=MXE_DB_DRIVER=)\S+' || promptuser "MXE_DB_DRIVER environment variable")
 mxe_schemaowner=$(echo "$deploy_env" | grep -Piom 1 '(?<=MXE_DB_SCHEMAOWNER=)\S+' || promptuser "MXE_DB_SCHEMAOWNER environment variable")
-encryption_secret=$(oc get deployments -o jsonpath='{..env[?(@.name == "MXE_SECURITY_CRYPTO_KEY")]..secretKeyRef.name}' | grep -Po '^\S+')
+encryption_secret=$(oc get deployments -o jsonpath='{..env[?(@.name == "MXE_SECURITY_CRYPTO_KEY")]..secretKeyRef.name}' | grep -Po '^\S+' || echo '')
 
 # 3.1.1 (Optionally) Fetch offline PVC info
 # '_' has special meaning; PVC is looked up from manage deployment
