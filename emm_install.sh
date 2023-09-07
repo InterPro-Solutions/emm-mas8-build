@@ -144,11 +144,22 @@ emm_url_config() {
   fi
 }
 wget_config() {
+  # Using S3 AccessKeyId & Secret
+  # https://glacius.tmont.com/articles/uploading-to-s3-in-bash
+  if [[ -n "$EMM_S3_RESOURCE" ]]; then
+    cat << EOM
+date_header=\$(date -R) &&\\
+stringToSign="GET\n\n\n\$date_header\n/$EMM_S3_RESOURCE" &&\\
+signature=\$(echo -en "\$stringToSign" | openssl dgst -sha1 -hmac "\$DEPLOY_PASSWORD" -binary | base64 -w 0) &&\\
+auth_header="AWS \$DEPLOY_USER:\$signature" &&\\
+echo "\$auth_header \$date_header" &&\\
+wget -O ezmaxmobile.zip -c "\$EMM_URL" --header="Authorization: \$auth_header" --header="Date: \$date_header"
+EOM
   # pass user & password to wget if set
-  if [[ -n "$DEPLOY_USER" || -n "$DEPLOY_SECRET" ]]; then
-    echo 'wget -O ezmaxmobile.zip --user "$DEPLOY_USER" --password "$DEPLOY_PASSWORD" -c "$EMM_URL"'
+  elif [[ -n "$DEPLOY_USER" || -n "$DEPLOY_SECRET" ]]; then
+    echo -n 'wget -O ezmaxmobile.zip --user "$DEPLOY_USER" --password "$DEPLOY_PASSWORD" -c "$EMM_URL"'
   else
-    echo 'wget -O ezmaxmobile.zip -c "$EMM_URL"'
+    echo -n 'wget -O ezmaxmobile.zip -c "$EMM_URL"'
   fi
 }
 # Backslash followed by newline is broken inside subshell heredocs, so use functions instead.
@@ -205,7 +216,7 @@ $(echo "$ear_build_insert" | sed 's/^/      /')
 
       RUN \\
         EMM_URL=$(emm_url_config) &&\\
-        $(wget_config) &&\\
+$(echo "$(wget_config)" | sed 's/^/        /') &&\\
         unzip ezmaxmobile.zip
 
       # Build EMM ear and print some debugging info
