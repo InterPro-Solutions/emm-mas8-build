@@ -50,9 +50,13 @@ fi
 #export java_keystore_password=9AUZyNWe4jrUN0Xd
 # TODO: Where is this hash from and is it needed?
 #export ENCRYPT_PROPERTY_HASH=5556b78805e7223631c659ee0836fa0663b176cb6bafb9fc5ea99f5ea565d84f
-#export MXE_SECURITY_CRYPTO_KEY=XVhIsqOvAOjmMiHCnuvHZmUN
+
+# If crypto keys not set, try to extract them from some `bundle.properties`
+if [[ -n $MXE_SECURITY_CRYPTO_KEY ]]; then
+  export MXE_SECURITY_CRYPTO_KEY=$(grep -Phiorm 1 '(?<=mxe\.security\.crypto\.key=)\S+' /config/manage/ || echo '')
+  export MXE_SECURITY_CRYPTOX_KEY=$(grep -Phiorm 1 '(?<=mxe\.security\.cryptox\.key=)\S+' /config/manage/ || echo '')
+fi
 #export MXE_SECURITY_OLD_CRYPTOX_KEY=swBfNAMPoIWJsZqlhEJtYhDh
-#export MXE_SECURITY_CRYPTOX_KEY=swBfNAMPoIWJsZqlhEJtYhDh
 #export MXE_SECURITY_OLD_CRYPTO_KEY=XVhIsqOvAOjmMiHCnuvHZmUN
 export SETENV_RUN=1
 set +a

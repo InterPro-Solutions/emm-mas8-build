@@ -332,6 +332,7 @@ app_url="https://$app_host"
 # Check for existing OAUTH secret for this app name
 oauth_secret=$(echo "$secrets" | grep -Pm 1 "credentials-oauth-$emm_liberty" || true)
 # If not found, register OIDC and create secret
+# TODO: Re-register based on app-host
 if [[ -z $oauth_secret ]]; then
   echo "Registering OIDC client..."
   oauth_basic="${oauth_username}:${oauth_password}"
@@ -473,7 +474,7 @@ fi
 echo "Discovering secrets/configuration for EMM deployment..."
 deployments=$(oc get deployments --show-labels=true)
 #instance_id=$(echo "$deployments" | grep -Piom 1 'instanceId=[^,]+' | sed -ne 's/instanceId=//ip' || promptuser "instanceId")
-app_binding=$(echo "$secrets" | grep -Pm 1 "\-workspace-(application-)?binding" || promptuser "-workspace-binding Secret")
+app_binding=$(echo "$secrets" | grep -Pm 1 "\-application-binding" || promptuser "-application-binding Secret")
 cert_public=$(echo "$secrets" | grep -Pm 1 "\-cert-public-" || promptuser "cert-public Secret")
 internal_manage_tls=$(echo "$secrets" | grep -Pm 1 "\-internal-manage-tls" || promptuser "internal_manage_tls Secret")
 # Fetch MAS_LOGOUT_URL & MXE_DB_DRIVER by reading the environment of the -masdev-* serverBundle deployment
@@ -484,6 +485,10 @@ mas_logout_url=$(echo "$deploy_env" | grep -Piom 1 '(?<=MAS_LOGOUT_URL=)\S+' || 
 mxe_db_driver=$(echo "$deploy_env" | grep -Piom 1 '(?<=MXE_DB_DRIVER=)\S+' || promptuser "MXE_DB_DRIVER environment variable")
 mxe_schemaowner=$(echo "$deploy_env" | grep -Piom 1 '(?<=MXE_DB_SCHEMAOWNER=)\S+' || promptuser "MXE_DB_SCHEMAOWNER environment variable")
 encryption_secret=$(oc get deployments -o jsonpath='{..env[?(@.name == "MXE_SECURITY_CRYPTO_KEY")]..secretKeyRef.name}' | grep -Po '^\S+' || echo '')
+# If no encryption secret, fallback to using bundle.properties
+if [[ -z "$encryption_secret" ]]; then
+  bundle_property=$(echo "$secrets" | grep -Pm 1 "\-bundleproperty" || echo '-bundleproperty Secret')
+fi
 
 # 3.1.1 (Optionally) Fetch offline PVC info
 # '_' has special meaning; PVC is looked up from manage deployment
@@ -634,6 +639,11 @@ EOM
             - name: internal-manage-tls
               readOnly: true
               mountPath: /etc/ssl/certs/internal-manage-tls
+$([[ -n "$bundle_property" ]] && cat << EOM
+            - name: bundle-properties
+              mountPath: /config/manage/properties
+EOM
+)
 $([[ -n "$OFFLINE_PVC" ]] && cat << EOM
             - name: $OFFLINE_PVC
               mountPath: /data
@@ -652,6 +662,13 @@ EOM
           secret:
             secretName: $internal_manage_tls
             defaultMode: 420
+$([[ -n "$bundle_property" ]] && cat << EOM
+        - name: bundle-properties
+          secret:
+            secretName: $bundle_property
+            defaultMode: 420
+EOM
+)
 $([[ -n "$OFFLINE_PVC" ]] && cat << EOM
         - name: $OFFLINE_PVC
           persistentVolumeClaim:
