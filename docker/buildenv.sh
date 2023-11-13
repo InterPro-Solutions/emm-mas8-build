@@ -19,6 +19,7 @@ cat << EOF > server.env
 AUTH_ISSUER_URL=$OAUTH_URL
 AUTH_DISCOVERY_URL=$OAUTH_URL/.well-known/openid-configuration
 OIDC_DISCOVERY_URL=$OAUTH_URL/.well-known/openid-configuration
+AUTH_LOGOUT_URL=$OAUTH_URL/logout
 EOF
 # Prepend environment variables to setenv
 cat << EOF > setenv2.sh
