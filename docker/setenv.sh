@@ -52,7 +52,7 @@ fi
 #export ENCRYPT_PROPERTY_HASH=5556b78805e7223631c659ee0836fa0663b176cb6bafb9fc5ea99f5ea565d84f
 
 # If crypto keys not set, try to extract them from some `bundle.properties`
-if [[ -n $MXE_SECURITY_CRYPTO_KEY ]]; then
+if [[ -z $MXE_SECURITY_CRYPTO_KEY ]]; then
   export MXE_SECURITY_CRYPTO_KEY=$(grep -Phiorm 1 '(?<=mxe\.security\.crypto\.key=)\S+' /config/manage/ || echo '')
   export MXE_SECURITY_CRYPTOX_KEY=$(grep -Phiorm 1 '(?<=mxe\.security\.cryptox\.key=)\S+' /config/manage/ || echo '')
 fi
