@@ -80,7 +80,7 @@ truststorecfg=$(echo "$configmaps" | grep -Pm 1 "\-truststore-cfg" || promptuser
 # If an all-build doesn't exist, the admin-build's dockerfile is used.
 default_ear_prelude() {
 cat << EOF
-FROM cp.icr.io/cp/manage/manageadmin:${manage_version} AS ADMIN
+${manage_version}
 
 ENV MXE_MASDEPLOYED=1
 
@@ -95,8 +95,8 @@ EOF
 }
 
 # Get manageadmin version from admin-build-config
-manage_version=$(oc get imagestreams -l bundleType=admin -o jsonpath='{.items[0]..labels.version}')
-[[ -z "$manage_version" ]] && manage_version='8.4.5'
+manage_version=$(oc get buildconfigs -l bundleType=admin -o jsonpath='{.items[0]..dockerfile}' | grep -Pm 1 'FROM\s+.*\s+AS\s+ADMIN' || echo 'FROM cp.icr.io/cp/manage/manageadmin:8.4.5 AS ADMIN')
+# manage_version=$(oc get imagestreams -l bundleType=admin -o jsonpath='{.items[0]..labels.version}')
 all_build_config=$(oc get buildconfigs -l bundleType=all -oname)
 # If all-build doesn't exist, we need to build it as part of the EAR build!
 # `BUILD_ALL_EAR` also triggers this
@@ -397,6 +397,9 @@ git_config() {
 }
 apply_output=$(
 #cat << EOF > emm-liberty-build-config.yaml
+      # from:
+      #   kind: ImageStreamTag
+      #   name: 'ubi-wlp-manage:latest'
 oc apply -f- << EOF
 apiVersion: build.openshift.io/v1
 kind: BuildConfig
@@ -489,6 +492,8 @@ encryption_secret=$(oc get deployments -o jsonpath='{..env[?(@.name == "MXE_SECU
 if [[ -z "$encryption_secret" ]]; then
   bundle_property=$(echo "$secrets" | grep -Pm 1 "\-bundleproperty" || echo '-bundleproperty Secret')
 fi
+# Get image repository from image stream itself
+image_repo=$(oc get imagestream -o jsonpath="{.items[?(@.metadata.name == \"${emm_liberty}\")]..dockerImageRepository}" || promptuser "emm-liberty ImageStream dockerImageRepository")
 
 # 3.1.1 (Optionally) Fetch offline PVC info
 # '_' has special meaning; PVC is looked up from manage deployment
@@ -538,6 +543,7 @@ spec:
     spec:
       containers:
         - name: $emm_liberty
+          # TODO: Customize resources/mirror from serverBundles
           command:
             - /bin/bash
             - '-c'
@@ -546,9 +552,7 @@ spec:
             - >-
               ./config/getkey.sh && source ./config/setenv.sh &&
               /opt/ibm/wlp/bin/server run defaultServer
-          # TODO: Get from imagestream itself
-          image: >-
-            image-registry.openshift-image-registry.svc:5000/${manage_namespace}/${emm_liberty}:v1
+          image: ${image_repo}:v1
           # When not using 'latest' tag, pullPolicy defaults to 'IfNotPresent', which won't auto-update
           imagePullPolicy: Always
           ports:
