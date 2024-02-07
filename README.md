@@ -1,9 +1,18 @@
 # EMM on OpenShift Liberty Installation Guide
 This guide will install EZMaxMobile into an OpenShift Cluster via the OpenShift CLI.
+
+Unless otherwise specified, any commands here should be run in a Bash terminal.
 ## (Windows) Install Git Bash
 A bash environment is required to run the installation script. On Windows, this can be installed via [Git Bash](https://git-scm.com/downloads).
 ## OpenShift CLI
 To run the script, the OpenShift CLI executable must be used, found [here](https://docs.openshift.com/container-platform/4.12/cli_reference/openshift_cli/getting-started-cli.html).
+
+You must have an active RedHat subscription to download the OC binary.
+
+You may have to place the OC binary on your `PATH`:
+```bash
+export PATH=$PATH:<path to OC binary>
+```
 ## Download script
 Download or use the included [EMM installation script](emm_install.sh).
 
@@ -12,11 +21,29 @@ You may need to mark the script as executable, i.e by running:
 chmod +x emm_install.sh
 ```
 
-from a Bash terminal.
+## Customize environment
+If not provided with an `emm*.env` configuration file, you can customize the template [emm.env](emm.env). Example:
+
+```bash
+# Core & Manage namespaces to deploy into
+# -core is needed for OIDC registration
+# -manage is the namespace/project EMM will deploy into
+core_namespace=<YOUR OCP MAS CORE NAMESPACE HERE>
+manage_namespace=<YOUR OCP MAS MANAGE NAMESPACE HERE>
+# Names for EAR & Liberty builds/deployments
+# DEFAULT_EMM_EAR is the name of the EAR build config/ImageStream
+# DEFAULT_LIBERTY_EAR will affect the final route EMM can be reached on!
+DEFAULT_EMM_EAR=emm-ear
+DEFAULT_LIBERTY_EAR=emm-liberty
+# Deployment info
+deploy_package=ezmaxmobile_*.zip
+```
 ## Installation
-1. Log in to the OpenShift web console, and select `<username> -> Copy Login Command` from the top right. Click `Display Token`.
-2. Paste the `oc login` command into a Bash terminal.
-3. Navigate to the directory of the script (i.e via `cd`) and run:
+1. Log in to the OpenShift web console (typically `kubeadmin` username`)
+2. In the upper right, click `<username> -> Copy Login Command`
+3. Click `Display Token`.
+4. Paste the `oc login` command into a terminal.
+5. Navigate to the directory of the script (i.e via `cd`) and run:
 ```bash
 ./emm_install.sh
 ```
@@ -27,7 +54,7 @@ You may be prompted for the names to use for the deployment and EAR build object
 For the latter, i.e if the script asks you for `Missing coreidp-binding Secret`, you may have to navigate to `Workloads -> Secrets`,
 and search through the `-manage` namespace for an object with a similar name to `coreidp-binding`.
 
-There is probably also an included `emm*.env` file, which contains configuration for a specific environment.
+You may also customize an `emm*.env` file, which contains configuration for a specific environment.
 
 4. In the OpenShift web console, navigate to `Networking -> Routes`, and click the Location of the route matching the new deployment.
 5. Add `/ezmaxmobile` to your browser's path, and confirm that you are redirected through the MAS 8 authentication flow to EZMaxMobile.
