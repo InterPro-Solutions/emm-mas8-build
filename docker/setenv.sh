@@ -56,7 +56,22 @@ if [[ -z $MXE_SECURITY_CRYPTO_KEY ]]; then
   export MXE_SECURITY_CRYPTO_KEY=$(grep -Phiorm 1 '(?<=mxe\.security\.crypto\.key=)\S+' /config/manage/ || echo '')
   export MXE_SECURITY_CRYPTOX_KEY=$(grep -Phiorm 1 '(?<=mxe\.security\.cryptox\.key=)\S+' /config/manage/ || echo '')
 fi
-#export MXE_SECURITY_OLD_CRYPTOX_KEY=swBfNAMPoIWJsZqlhEJtYhDh
-#export MXE_SECURITY_OLD_CRYPTO_KEY=XVhIsqOvAOjmMiHCnuvHZmUN
+
+# if not run yet, inject EMM_PROP_* environment variables
+# into JVM options
+if [[ -z "$SETENV_RUN" ]]; then
+  jvm_options="/config/jvm.options"
+  temp_file=$(mktemp || echo 'temp.env')
+  env | \grep "EMM_PROP" > "$temp_file"
+  while IFS='=' read -r line; do
+    value=${line#*=}
+    name=${line%%=*}
+    prop_name=$(echo "${name#EMM_PROP_}" | tr _ .) # replace all '_' with '.'
+    echo -e "-Xms1G\n-Xmx4G" > "$jvm_options"
+    echo "-D$prop_name=$value" >> "$jvm_options"
+  done < "$temp_file"
+  rm $temp_file
+fi
+
 export SETENV_RUN=1
 set +a
