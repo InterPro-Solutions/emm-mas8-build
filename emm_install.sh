@@ -3,14 +3,78 @@
 # Within this file are embedded multiple separate YAML files used to create the OpenShift objects.
 # Each installation step is numbered to aid navigation.
 
+# This script makes extensive use of the OpenShift CLI
+# The docs for `oc` commands can be found here:
+# https://docs.openshift.com/container-platform/4.14/cli_reference/openshift_cli/developer-cli-commands.html
+
+# Docs for OpenShift BuildConfig and Deployment objects:
+# https://docs.openshift.com/container-platform/4.14/cicd/builds/understanding-buildconfigs.html
+# https://docs.openshift.com/container-platform/4.14/applications/deployments/what-deployments-are.html
+
+# As part of the installation process,
+#  we need to register EMM with MAS 8's OIDC
+# WebSphere Liberty OIDC docs: https://www.ibm.com/docs/en/was-liberty/base?topic=connect-openid-endpoint-urls#rwlp_oidc_endpoint_urls__coverage_map_endpoint
+
+# Outline of steps:
+# 0: Check for CLI, connect to OpenShift cluster
+# 1: Setup and build the `emm-ear` BuildConfig
+# 2: Setup and build the `emm-liberty` BuildConfig
+# 3. Create Deployment, Route, & Service
+
+# JSONPath docs:
+# # See https://github.com/json-path/JsonPath for docs
+
 DEFAULT_EMM_EAR="emm-ear"
 DEFAULT_LIBERTY_EAR="emm-liberty"
+
+# For a string like "type/name", remove the "type/"
+# Useful for many of the `oc get` commands we run
+remove_type() {
+  sed -e 's/^.*\///'
+}
 
 # Prompts user for name and returns
 promptuser() {
   read -p "Missing $1, please enter name: " -r
   if [[ -z "$REPLY" ]]; then echo "Error: Missing value for $1, exiting" >&2 && exit 1; fi
   echo "$REPLY"
+}
+
+# Tries to read OC logs from pod, build-config, etc
+# $1: object type, usually 'bc' for BuildConfig
+# $2: object name
+tee_logs() {
+  found=''
+  # Try up to 3 times
+  for i in 1 2 3; do
+    test_line=$(oc logs --tail=1 --pod-running-timeout=10m "$1/$2" 2>&1 || echo "timed out")
+    echo "$test_line"
+    if [[ -z "$(echo "$test_line" | grep -Pm 1 'unable|not found')" ]]; then
+      found='1'
+      break
+    fi
+    sleep 10 # sleep for 10 seconds
+  done
+  if [[ -n "$found" ]]; then
+    echo "Following logs for "$1/$2":"
+    oc logs -f "$1/$2" | tee "$2.log"
+  else
+    echo "Unable to retrieve logs for $1/$2."
+  fi
+}
+
+# start a new build and follow logs
+start_build_and_log() {
+  start_output=$(oc start-build "$1")
+  if [[ -n "$(echo "$start_output" | grep -Pm 1 'started')" ]]; then
+    build_name=$(echo "$start_output" | grep -Pom 1 "(?<=/)\S+")
+    tee_logs build "$build_name"
+    build_status=$(oc get builds "$build_name" -o jsonpath='{..status.phase}')
+    if [[ -n "$(echo "$build_status" | grep -Pm 1 'ailed')" ]]; then
+      echo "Error; Build "$build_name" failed. Check build logs for details."
+      exit 1
+    fi
+  fi
 }
 
 # 0. Try to source in environment variables from companion file(s)
@@ -33,7 +97,7 @@ set -e
 # 0.2 Check for admin permissions
 if [[ $(oc auth can-i '*' '*') != 'yes' ]]; then echo "Insufficient permissions to install. Please copy and paste Login command with permissions and try again." && exit 1; fi
 # Try and find core & manage projects
-namespaces=$(oc get namespaces -oname | sed -e 's/^.*\///')
+namespaces=$(oc get namespaces -oname | remove_type)
 [[ -z "$core_namespace" ]] && core_namespace=$(promptuser "Core namespace")
 [[ -z "$manage_namespace" ]] && manage_namespace=$(promptuser "Manage namespace")
 instance_id=$(echo $core_namespace | grep -Po -- "(?<=-).*(?=-)" || promptuser "Workspace/instance ID")
@@ -44,7 +108,9 @@ echo "Manage namespace: $manage_namespace"
 # 1. Build EMM EAR image
 # 1.1 Switch to manage namespace and create EMM EAR ImageStream
 oc project "$manage_namespace"
-imagestreams=$(oc get imagestreams -oname | sed -e 's/^.*\///') # remove leading '***/'
+imagestreams=$(oc get imagestreams -oname | remove_type)
+# Find the ImageStream of Manage's admin build
+# grep: P=Extended regex, (o)nly (m)atch-1
 applicationid=$(echo "$imagestreams" | grep -Pom 1 "(?<=$instance_id-).*(?=-admin)" || promptuser "masdev application ID")
 emm_ear=$(echo "$imagestreams" | grep -Pm 1 "$DEFAULT_EMM_EAR" || true)
 # Matching EAR found; prompt to use it
@@ -70,9 +136,9 @@ masdev_image=$(echo "$imagestreams" | grep -Pm 1 "\-$applicationid-admin" || pro
 echo "masdev image: $masdev_image"
 # 1.2.2 Find image secrets & ConfigMaps
 echo "Discovering secrets/configuration for EMM EAR build..."
-secrets=$(oc get secrets -oname | sed -e 's/^.*\///') # remove leading '***/'
+secrets=$(oc get secrets -oname | remove_type)
 truststorepasswd=$(echo "$secrets" | grep -Pm 1 "\-truststorepasswd" || promptuser "truststorepasswd Secret")
-configmaps=$(oc get configmaps -oname | sed -e 's/^.*\///') # remove leading '***/'
+configmaps=$(oc get configmaps -oname | remove_type)
 truststorecfg=$(echo "$configmaps" | grep -Pm 1 "\-truststore-cfg" || promptuser "truststorecfg ConfigMap")
 
 # 1.2.2 Check if we need to build maximo-all.ear
@@ -95,12 +161,17 @@ EOF
 }
 
 # Get manageadmin version from admin-build-config
+# With JSONPath we can select the Dockerfile directly
+# See https://github.com/json-path/JsonPath for docs
 manage_version=$(oc get buildconfigs -l bundleType=admin -o jsonpath='{.items[0]..dockerfile}' | grep -Pm 1 'FROM\s+.*\s+AS\s+ADMIN' || echo 'FROM cp.icr.io/cp/manage/manageadmin:8.4.5 AS ADMIN')
+# Recently (~2023), IBM has started to use a commit hash for the version Manage pulls
+# So we can't assume that grabbing the number alone from the bundle is enough
 # manage_version=$(oc get imagestreams -l bundleType=admin -o jsonpath='{.items[0]..labels.version}')
 all_build_config=$(oc get buildconfigs -l bundleType=all -oname)
 # If all-build doesn't exist, we need to build it as part of the EAR build!
 # `BUILD_ALL_EAR` also triggers this
 if [[ -z "$all_build_config" || -n "$BUILD_ALL_EAR" ]]; then
+  # sed: (E)xtended regex, 'G': append newline
   ear_build_insert=$(oc get buildconfigs -l bundleType=admin -o jsonpath='{.items[0]..dockerfile}' | sed -Ee 's/\s*RUN.*buildmaximo\S+\.sh.*$/RUN .\/maximo-all.sh/' | sed -e 'G')
   echo "No 'all' server bundle; will build maximo-all.ear from scratch"
 else
@@ -110,14 +181,18 @@ fi
 # 1.2.3 Write BuildConfig
 ear_config=${emm_ear}-build-config
 deploy_package="${deploy_package:=ezmaxmobile.zip}"
+# InterPro: See the Lambda script documentation for how to generate this token
+# https://github.com/InterPro-Solutions/lambda-scripts/blob/main/ezmax-deploy/README.md#signing
+# It can also be set as an environment variable in an .env file, which will override this value
 [[ -z "$deploy_token" ]] && deploy_token='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJidWNrZXQiOiJ0ZXN0LWVtbS1kZXBsb3ltZW50cyIsImtleVJlZyI6Ii4qZXptYXhtb2JpbGVbXi9dKiQifQ.-Npu7D9vSUxZkTEbmDrNgdBswmR8E3U6K-PN95yyJ9o'
 echo "EMM deploy package: $deploy_package"
 # We need to modify the commands to pull the ezmaxmobile.zip file for the client
 # which may have an HTTP server to pull from instead.
-# If EMM_URL etc. specified, write them into the build config
+# If EMM_URL etc. specified directly, write them into the build config
 deploy_env_config() {
   [[ -n "$EMM_URL" ]] && echo -e "- name: EMM_URL\n  value: $EMM_URL"
-  # get username & password from secret
+  # Using a Secret to get username & password;
+  # We write these into the config so it can access them
   if [[ -n "$DEPLOY_SECRET" ]]; then
     cat << EOF
 - name: DEPLOY_USER
@@ -132,6 +207,7 @@ deploy_env_config() {
       key: password
 EOF
   else
+    # echo: Enable (e)scape sequences (like '\n')
     [[ -n "$DEPLOY_USER" ]] && echo -e "- name: DEPLOY_USER\n  value: $DEPLOY_USER"
     [[ -n "$DEPLOY_PASSWORD" ]] && echo -e "- name: DEPLOY_PASSWORD\n  value: $DEPLOY_PASSWORD"
   fi
@@ -144,7 +220,7 @@ emm_url_config() {
   fi
 }
 wget_config() {
-  # Using S3 AccessKeyId & Secret
+  # Using AWS AccessKey ID & Secret
   # https://glacius.tmont.com/articles/uploading-to-s3-in-bash
   if [[ -n "$EMM_S3_RESOURCE" ]]; then
     cat << EOM
@@ -266,17 +342,23 @@ EOM
 EOF
 }
 apply_output=$(apply_ear_config "$ear_config" "${masdev_image}:latest")
-# Also create a -rebuild-config just for rebuilding EMM
+# If no -all server bundle, we also create a "rebuild" config for EMM
+# This allows rebuilding EMM without having to rebuild maximo-all every time
 if [[ -n "$BUILD_ALL_EAR" ]]; then
-  ear_build_insert=$(default_ear_prelude) # don't include maximo-all build insert for rebuild
+  ear_build_insert=$(default_ear_prelude) # don't include maximo-all build insert for rebuild!
+  # Passing '1' removes the ConfigChange trigger; this config has to be rebuilt via 'Start Build'
   rebuild_apply_output=$(apply_ear_config "${emm_ear}-rebuild-config" "${emm_ear}:v1" "1")
 fi
 # 1.3 (Optional) Build EMM EAR
 # Build EAR only if config was changed (and not created)
-# This is needed because the ConfigChange trigger only builds on initial creation as of 2023-04-28
+# Needed because the ConfigChange trigger only builds on initial creation as of 2023-04-28
 if [[ -z "$(echo "$apply_output" | grep -Pm 1 'unchanged|created')" ]]; then
   ear_config_changed="1"
-  oc start-build $ear_config --wait
+  # oc start-build $ear_config --wait
+  start_build_and_log $ear_config
+# 'created'
+elif [[ -n "$(echo "$apply_output" | grep -Pm 1 'created')" ]]; then
+  tee_logs bc "$ear_config"
 fi
 
 # 2. Create EMM Liberty image
@@ -330,9 +412,14 @@ apps_domain_name=$(echo $domain_name | grep -Pom 1 "apps[^/]*" || promptuser "ap
 app_host="${app_host:=$emm_liberty-$manage_namespace.$apps_domain_name}"
 app_url="https://$app_host"
 # Check for existing OAUTH secret for this app name
+# The WebSphere liberty server that runs inside the pod must be configured
+# to handle the authentication flow through MAS8
+# See https://www.ibm.com/docs/en/was-liberty/base?topic=cocpil-configuring-openid-connect-provider-accept-client-registration-requests
 oauth_secret=$(echo "$secrets" | grep -Pm 1 "credentials-oauth-$emm_liberty" || true)
 # If not found, register OIDC and create secret
 # TODO: Re-register based on app-host
+# Note: If app-host changes after this has been registered,
+# Delete the oauth_secret and re-run the script
 if [[ -z $oauth_secret ]]; then
   echo "Registering OIDC client..."
   oauth_basic="${oauth_username}:${oauth_password}"
@@ -481,7 +568,7 @@ app_binding=$(echo "$secrets" | grep -Pm 1 "\-application-binding" || promptuser
 cert_public=$(echo "$secrets" | grep -Pm 1 "\-cert-public-" || promptuser "cert-public Secret")
 internal_manage_tls=$(echo "$secrets" | grep -Pm 1 "\-internal-manage-tls" || promptuser "internal_manage_tls Secret")
 # Fetch MAS_LOGOUT_URL & MXE_DB_DRIVER by reading the environment of the -masdev-* serverBundle deployment
-deployments=$(oc get deployments -l mas.ibm.com/appType=serverBundle -oname | sed -e 's/^.*\///') # remove leading '***/')
+deployments=$(oc get deployments -l mas.ibm.com/appType=serverBundle -oname | remove_type) # remove leading '***/')
 masdev_deploy=$(echo "$deployments" | grep -Pm 1 "\-$applicationid[\w-]+$" || promptuser "$applicationid-all Deployment")
 deploy_env=$(oc set env deployment/$masdev_deploy --list)
 mas_logout_url=$(echo "$deploy_env" | grep -Piom 1 '(?<=MAS_LOGOUT_URL=)\S+' || promptuser "MAS_LOGOUT_URL")
@@ -543,7 +630,8 @@ spec:
     spec:
       containers:
         - name: $emm_liberty
-          # TODO: Customize resources/mirror from serverBundles
+          # TODO: Customize resources/mirror from serverBundles?
+          # We may want to set CPU, memory limits based on Manage
           command:
             - /bin/bash
             - '-c'
@@ -707,8 +795,8 @@ spec:
 EOF
 
 # 3.4 Get Route cert info
-# Fetch Cert info from Manage's Route
-routes=$(oc get route -l mas.ibm.com/applicationId=manage -oname | sed -e 's/^.*\///') # remove leading '***/')
+# Fetch certificate info from Manage's Route
+routes=$(oc get route -l mas.ibm.com/applicationId=manage -oname | sed -e 's/^.*\///')
 masdev_route=$(echo "$routes" | \grep -Pm 1 "\-manage-$applicationid" || promptuser "manage-$applicationid Route")
 route_cert=$(oc get route "$masdev_route" -o jsonpath='{..spec.tls.certificate}')
 if [[ -z "$route_cert" ]]; then echo "Error: Could not find route certificate" && exit 1; fi
@@ -748,7 +836,14 @@ $(echo "$route_dest_cert" | sed 's/^/      /')
   wildcardPolicy: None
 EOF
 
+# Wait for rollout; optionally tail pod logs
+pod_logs="oc logs -f deployment/$emm_liberty -c $emm_liberty --since=0s"
 oc rollout status deployment $emm_liberty --watch --timeout=60m
 echo "Successfully deployed EZMaxmobile. Deployment name: $emm_liberty"
+echo "To view deployment pod logs: $pod_logs"
+read -p "Follow pod logs now? [y/N]: " -r
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+  eval "$pod_logs" | tee "$emm_liberty.log";
+fi
 set +x
 set +e

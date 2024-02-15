@@ -59,6 +59,7 @@ fi
 
 # if not run yet, inject EMM_PROP_* environment variables
 # into JVM options
+# i.e, EMV_PROP_MAXIMO_DB_URL will be set up as -Dmaximo.db.url=
 if [[ -z "$SETENV_RUN" ]]; then
   jvm_options="/config/jvm.options"
   temp_file=$(mktemp || echo 'temp.env')
