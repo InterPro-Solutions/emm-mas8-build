@@ -8,7 +8,7 @@ COPY --chmod=775 --chown=1001:0 buildenv.sh /config/
 COPY --chmod=775 --chown=1001:0 setenv.sh /config/
 COPY --chmod=775 --chown=1001:0 getkey.sh /config/
 COPY --chown=1001:0 server.xml /config/
-COPY --chown=1001:0 jvm.options /config/
+COPY --chmod=775 --chown=1001:0 jvm.options /config/
 
 RUN rm /opt/ibm/wlp/usr/servers/defaultServer/server.env && mkdir /managefiles/additional-server-files
 

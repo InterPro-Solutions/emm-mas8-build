@@ -59,7 +59,7 @@ fi
 
 # if not run yet, inject EMM_PROP_* environment variables
 # into JVM options
-# i.e, EMV_PROP_MAXIMO_DB_URL will be set up as -Dmaximo.db.url=
+# i.e, EMM_PROP_maximo_db_url will be set up as -Dmaximo.db.url=
 if [[ -z "$SETENV_RUN" ]]; then
   jvm_options="/config/jvm.options"
   temp_file=$(mktemp || echo 'temp.env')
@@ -67,7 +67,8 @@ if [[ -z "$SETENV_RUN" ]]; then
   while IFS='=' read -r line; do
     value=${line#*=}
     name=${line%%=*}
-    prop_name=$(echo "${name#EMM_PROP_}" | tr _ .) # replace all '_' with '.'
+    # replace all '_' with '.'
+    prop_name=$(echo "${name#EMM_PROP_}" | tr _ .) # | tr '[:upper:]' '[:lower:]')
     echo -e "-Xms1G\n-Xmx4G" > "$jvm_options"
     echo "-D$prop_name=$value" >> "$jvm_options"
   done < "$temp_file"
