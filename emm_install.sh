@@ -591,6 +591,23 @@ if [[ -n "$OFFLINE_PVC" ]]; then
   echo "Using offline PVC: $OFFLINE_PVC"
 fi
 
+# Write all environment variables starting with EMM_PROP
+# into the deployment.
+# This way they are accessible to EMM later
+pass_emm_props() {
+  # Create a temp file to write to
+  temp_file=$(mktemp || echo 'temp.env')
+  # We use `set` instead of `env` to grab locally `source`'d vars too!
+  # https://stackoverflow.com/a/1305273
+  (set -o posix; set ) | grep "EMM_PROP" > "$temp_file"
+  while IFS='=' read -r line; do
+    name=${line%%=*}
+    value=${line#*=}
+    echo -e "- name: $name\n  value: $value"
+  done < "$temp_file"
+  rm "$temp_file"
+}
+
 # 3.2 Create deployment config
 echo "Deploying EZMaxMobile..."
 # https://docs.openshift.com/container-platform/4.8/openshift_images/triggering-updates-on-imagestream-changes.html
@@ -721,6 +738,7 @@ EOM
                 secretKeyRef:
                   name: $oauth_secret
                   key: password
+$(echo "$(pass_emm_props)" | sed 's/^/            /')
           volumeMounts:
             - name: manage-truststore
               readOnly: true
@@ -840,10 +858,11 @@ EOF
 pod_logs="oc logs -f deployment/$emm_liberty -c $emm_liberty --since=0s"
 oc rollout status deployment $emm_liberty --watch --timeout=60m
 echo "Successfully deployed EZMaxmobile. Deployment name: $emm_liberty"
+echo "Connect to EMM at: http://$app_host/ezmaxmobile"
 echo "To view deployment pod logs: $pod_logs"
 read -p "Follow pod logs now? [y/N]: " -r
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-  eval "$pod_logs" | tee "$emm_liberty.log";
+  eval "$pod_logs" | tee "$emm_liberty.log"
 fi
 set +x
 set +e
