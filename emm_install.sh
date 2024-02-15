@@ -57,7 +57,7 @@ tee_logs() {
   done
   if [[ -n "$found" ]]; then
     echo "Following logs for "$1/$2":"
-    oc logs -f "$1/$2" | tee "$2.log"
+    oc logs -f "$1/$2" | tee "$2.log" || echo "Disconnected from build logs."
   else
     echo "Unable to retrieve logs for $1/$2."
   fi
