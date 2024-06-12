@@ -141,7 +141,7 @@ truststorepasswd=$(echo "$secrets" | grep -Pm 1 "\-truststorepasswd" || promptus
 configmaps=$(oc get configmaps -oname | remove_type)
 truststorecfg=$(echo "$configmaps" | grep -Pm 1 "\-truststore-cfg" || promptuser "truststorecfg ConfigMap")
 
-# 1.2.2 Check if we need to build maximo-all.ear
+# 1.2.3 Check if we need to build maximo-all.ear
 # This docker section is prepended by default;
 # If an all-build doesn't exist, the admin-build's dockerfile is used.
 default_ear_prelude() {
@@ -178,7 +178,7 @@ else
   ear_build_insert=$(default_ear_prelude)
 fi
 
-# 1.2.3 Write BuildConfig
+# 1.2.4 Write BuildConfig
 ear_config=${emm_ear}-build-config
 deploy_package="${deploy_package:=ezmaxmobile.zip}"
 # InterPro: See the Lambda script documentation for how to generate this token
