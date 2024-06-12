@@ -392,8 +392,7 @@ metadata:
   annotations:
     build.openshift.io/source-secret-match-uri-1: 'ssh://github.com:InterPro-Solutions/*'
 data:
-  ssh-privatekey: >-
-    LS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KYjNCbGJuTnphQzFyWlhrdGRqRUFBQUFBQkc1dmJtVUFBQUFFYm05dVpRQUFBQUFBQUFBQkFBQUFNd0FBQUF0emMyZ3RaVwpReU5UVXhPUUFBQUNCWTBWeTBZUi8za2lXU1JKU3J6Q294cmRZcnNiM080NzhkSXQxZUFIa1huQUFBQUtCWFNHZktWMGhuCnlnQUFBQXR6YzJndFpXUXlOVFV4T1FBQUFDQlkwVnkwWVIvM2tpV1NSSlNyekNveHJkWXJzYjNPNDc4ZEl0MWVBSGtYbkEKQUFBRUJXeS9qTnQ5dGR2Z3VQczlUeDB5WWdKT2tuN0FXRWEzbm5SYVFlYWVkb2xGalJYTFJoSC9lU0paSkVsS3ZNS2pHdAoxaXV4dmM3anZ4MGkzVjRBZVJlY0FBQUFHWE51YnprNU1EZ2dSMmwwU0hWaUlHUmxjR3h2ZVNCclpYa0JBZ01FCi0tLS0tRU5EIE9QRU5TU0ggUFJJVkFURSBLRVktLS0tLQo=
+  ssh-privatekey: none
 type: kubernetes.io/ssh-auth
 EOF
 source_secret=emm-mas8-build-ssh-key
@@ -858,7 +857,7 @@ EOF
 pod_logs="oc logs -f deployment/$emm_liberty -c $emm_liberty --since=0s"
 oc rollout status deployment $emm_liberty --watch --timeout=60m
 echo "Successfully deployed EZMaxmobile. Deployment name: $emm_liberty"
-echo "Connect to EMM at: http://$app_host/ezmaxmobile"
+echo "Connect to EMM at: https://$app_host/ezmaxmobile"
 echo "To view deployment pod logs: $pod_logs"
 read -p "Follow pod logs now? [y/N]: " -r
 if [[ $REPLY =~ ^[Yy]$ ]]; then
