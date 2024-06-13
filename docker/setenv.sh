@@ -64,12 +64,12 @@ if [[ -z "$SETENV_RUN" ]]; then
   jvm_options="/config/jvm.options"
   temp_file=$(mktemp || echo 'temp.env')
   env | \grep "EMM_PROP" > "$temp_file"
+  echo -e "-Xms1G\n-Xmx4G" > "$jvm_options"
   while IFS='=' read -r line; do
     value=${line#*=}
     name=${line%%=*}
     # replace all '_' with '.'
     prop_name=$(echo "${name#EMM_PROP_}" | tr _ .) # | tr '[:upper:]' '[:lower:]')
-    echo -e "-Xms1G\n-Xmx4G" > "$jvm_options"
     echo "-D$prop_name=$value" >> "$jvm_options"
   done < "$temp_file"
   rm $temp_file
