@@ -182,6 +182,8 @@ fi
 ear_config=${emm_ear}-build-config
 deploy_package="${deploy_package:=ezmaxmobile.zip}"
 
+[[ -z "$deploy_token" ]] && echo "ERROR: deploy_token NOT SET INSIDE FILE emm.env" && echo "PLEASE INSERT A TOKEN AND TRY AGAIN" && exit
+
 echo "EMM deploy package: $deploy_package"
 # We need to modify the commands to pull the ezmaxmobile.zip file for the client
 # which may have an HTTP server to pull from instead.
