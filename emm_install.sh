@@ -181,10 +181,9 @@ fi
 # 1.2.4 Write BuildConfig
 ear_config=${emm_ear}-build-config
 deploy_package="${deploy_package:=ezmaxmobile.zip}"
-# InterPro: See the Lambda script documentation for how to generate this token
-# https://github.com/InterPro-Solutions/lambda-scripts/blob/main/ezmax-deploy/README.md#signing
-# It can also be set as an environment variable in an .env file, which will override this value
-[[ -z "$deploy_token" ]] && deploy_token='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJidWNrZXQiOiJ0ZXN0LWVtbS1kZXBsb3ltZW50cyIsImtleVJlZyI6Ii4qZXptYXhtb2JpbGVbXi9dKiQifQ.-Npu7D9vSUxZkTEbmDrNgdBswmR8E3U6K-PN95yyJ9o'
+
+[[ -z "$deploy_token" ]] && echo "Error: deploy_token not set inside file emm.env" && echo "Please insert a token and try again" && exit
+
 echo "EMM deploy package: $deploy_package"
 # We need to modify the commands to pull the ezmaxmobile.zip file for the client
 # which may have an HTTP server to pull from instead.
