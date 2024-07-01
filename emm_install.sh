@@ -233,9 +233,18 @@ EOM
   # pass user & password to wget if set
   elif [[ -n "$DEPLOY_USER" || -n "$DEPLOY_SECRET" ]]; then
     echo -n 'wget -O ezmaxmobile.zip --user "$DEPLOY_USER" --password "$DEPLOY_PASSWORD" -c "$EMM_URL"'
+  elif [[ -n $GDrive_FileID ]]; then
+    echo "we go there!!"
+    echo -n "wget --load-cookies /tmp/cookies.txt \"https://docs.google.com/uc?export=download&confirm=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate 'https://docs.google.com/uc?export=download&id='$GDrive_FileID  -O- | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1\n/p')&id=$GDrive_FileID\" -O $deploy_package && rm -rf /tmp/cookies.txt"
+    echo "we did it!!!"
+    # echo -n "wget google drive stuff"
   else
     echo -n 'wget -O ezmaxmobile.zip -c "$EMM_URL"'
   fi
+  echo "we escaped!!!"
+  exit()
+  exit
+  error here
 }
 # Backslash followed by newline is broken inside subshell heredocs, so use functions instead.
 # See https://unix.stackexchange.com/a/534078
