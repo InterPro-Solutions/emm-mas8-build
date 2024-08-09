@@ -406,12 +406,16 @@ oauth_url=$(oc get secret $coreidp_binding --template='{{.data.url|base64decode}
 oauth_username=$(oc get secret $coreidp_binding -o jsonpath="{.data['oauth-admin-username']}" | base64 -d)
 oauth_password=$(oc get secret $coreidp_binding -o jsonpath="{.data['oauth-admin-password']}" | base64 -d)
 domain_name=$(echo $oauth_url | grep -Pom 1 "(?<=https://auth.)[^/]*" || promptuser "domain name")
+env_domain_name=$(echo "$domain_name")
 apps_domain_name=$(echo $domain_name | grep -Pom 1 "apps[^/]*" || promptuser "apps domain name")
 prefixing_app_domain_name=$(echo "-$manage_namespace")
 if [[ -n "$CERTIFICATE_COMMON_NAME_PREFIX" ]]; then
   prefixing_app_domain_name=$(echo ".$CERTIFICATE_COMMON_NAME_PREFIX")
 fi
 app_host="${app_host:=$emm_liberty$prefixing_app_domain_name.$apps_domain_name}"
+if [[ -n "$USE_MODIFIED_ENV_DOMAIN_NAME" ]]; then
+  env_domain_name=$(echo "$app_host")
+fi
 app_url="https://$app_host"
 # Check for existing OAUTH secret for this app name
 # The WebSphere liberty server that runs inside the pod must be configured
@@ -727,7 +731,7 @@ EOM
             - name: APP_URL
               value: $app_url
             - name: DOMAIN_NAME
-              value: $domain_name
+              value: $env_domain_name
             - name: CORE_NAMESPACE
               value: $core_namespace
             - name: CLIENT_ID
