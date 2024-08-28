@@ -755,6 +755,11 @@ $(echo "$(pass_emm_props)" | sed 's/^/            /')
             - name: internal-manage-tls
               readOnly: true
               mountPath: /etc/ssl/certs/internal-manage-tls
+$([[ -n "$DOCLINKS_PVC_NAME" ]] && cat << EOM
+            - name: doclinks-pvc
+              mountPath: /doclinks
+EOM
+)
 $([[ -n "$bundle_property" ]] && cat << EOM
             - name: bundle-properties
               mountPath: /config/manage/properties
@@ -778,6 +783,12 @@ EOM
           secret:
             secretName: $internal_manage_tls
             defaultMode: 420
+$([[ -n "$DOCLINKS_PVC_NAME" ]] && cat << EOM
+        - name: doclinks-pvc
+          persistentVolumeClaim:
+            claimName: $DOCLINKS_PVC_NAME
+EOM
+)
 $([[ -n "$bundle_property" ]] && cat << EOM
         - name: bundle-properties
           secret:
